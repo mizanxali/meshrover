@@ -1,0 +1,26 @@
+{
+  "name": "meshrover",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --import tsx --test 'src/**/*.test.ts'",
+    "typecheck": "tsc --noEmit",
+    "web": "npm --prefix web run dev"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@0gfoundation/0g-storage-ts-sdk": "^1.2.13",
+    "@napi-rs/canvas": "^1.1.0",
+    "ethers": "^6.13.1",
+    "jose": "^6.2.15",
+    "viem": "^2.57.16"
+  }
+}

@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+[profile.default]
+src = "src"
+script = "script"
+test = "test"
+libs = ["lib"]
+solc = "0.8.30"
+
+[rpc_endpoints]
+sepolia = "https://rpc.sepolia.ethpandaops.io"
+galileo = "https://0g-galileo-testnet.drpc.org"
