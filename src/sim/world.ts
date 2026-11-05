@@ -3,9 +3,9 @@
 // frame at a checkpoint (signs and obstacles drawn large for the vision model).
 import { createCanvas } from '@napi-rs/canvas';
 import type { Action } from '../protocol.ts';
-import { EDGES, NODES, PALLETS } from './map.ts';
+import { EDGES, NODES, PALLETS, ZONES } from './map.ts';
 
-export { EDGES, NODES, PALLETS };
+export { EDGES, NODES, PALLETS, ZONES };
 export const STOP_DISTANCE = 1.5; // the motion loop halts this far short of a pallet
 
 const at = (id: string) => NODES[id] ?? (() => { throw new Error(`no node ${id}`); })();

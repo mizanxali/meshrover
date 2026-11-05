@@ -1,26 +1,35 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // One simulated rover: the 20 Hz motion loop and the decision state machine.
 // `tick` never awaits: a checkpoint fires its request and the loop keeps
-// ticking. Only a decision that `acceptDecision` passes sets the rover moving;
-// every doubt ends in SAFE_STOPPED, which retries with a new seq.
-import { createHash } from 'node:crypto';
-import { type Action, type DecideRequest, type DecideResponse, type Pending, ROVER_DEADLINE_MS, acceptDecision } from '../protocol.ts';
-import { NODES, STOP_DISTANCE, type View, exits, headingTo, junctionView, nextAlong, palletAhead, palletView } from './world.ts';
+// ticking. Only a decision that `acceptDecision` passes sets the rover moving,
+// and only an approval that `acceptApproval` passes takes it into a restricted
+// zone; every doubt ends in SAFE_STOPPED, which retries with a new seq.
+import { createHash, randomBytes } from 'node:crypto';
+import {
+  type Action, type ApproveRequest, type DecideRequest, type DecideResponse, type Pending, type PendingApproval, type Roster,
+  ROVER_APPROVAL_DEADLINE_MS, ROVER_DEADLINE_MS, acceptApproval, acceptDecision,
+} from '../protocol.ts';
+import { NODES, STOP_DISTANCE, type View, ZONES, exits, headingTo, junctionView, nextAlong, palletAhead, palletView } from './world.ts';
 
-export type State = 'DRIVING' | 'AWAITING_DECISION' | 'SAFE_STOPPED';
-export type LogEntry = { kind: 'decision' | 'safe_stop'; [k: string]: unknown };
+export type State = 'DRIVING' | 'AWAITING_DECISION' | 'AWAITING_APPROVAL' | 'SAFE_STOPPED';
+export type LogEntry = { kind: 'decision' | 'safe_stop' | 'approval' | 'denied'; [k: string]: unknown };
 
 const SPEED = 2; // m/s
 export const RETRY_MS = 3000;
+export const APPROVAL_RETRY_MS = 10_000; // each retry starts a new World ID request, so not too often
 
 type Options = {
   robot: string;
   episode: string;
   base: string; // the base's mesh address: the only provider whose answers count
+  roster: Roster; // who may approve, checked again here whatever the base says
   send: (req: DecideRequest) => Promise<unknown>;
+  sendApproval: (req: ApproveRequest) => Promise<unknown>;
   log: (e: LogEntry) => void; // synchronous: an entry is on disk before the motion it leads to
   render: (v: View) => string;
 };
+
+const zoneOf = (node: string) => Object.keys(ZONES).find((z) => ZONES[z]!.includes(node));
 
 export class Rover {
   state: State = 'SAFE_STOPPED';
@@ -31,11 +40,13 @@ export class Rover {
   battery = 1;
   seq = 0;
   pending: Pending | null = null;
+  approving: PendingApproval | null = null;
   last: (DecideResponse & { checkpoint: string; latency_ms: number; frame: string }) | null = null;
   recent: LogEntry[] = [];
   private from = 'g';
   private to = 'J1';
   private view: View | null = null; // the checkpoint the rover is held at
+  private gate: { zone: string; from: string; to: string } | null = null; // the zone entry the rover is held at
   private frame = '';
   private tRequest = 0;
   private retryAt = 0;
@@ -51,7 +62,11 @@ export class Rover {
 
   tick(now: number, dt: number) {
     if (this.pending && now > this.pending.deadline) this.stop('no decision by the deadline', now);
-    if (this.state === 'SAFE_STOPPED' && !this.pending && now >= this.retryAt) this.ask(now);
+    if (this.approving && now > this.approving.deadline) this.deny('no approval by the deadline', now);
+    if (this.state === 'SAFE_STOPPED' && !this.pending && !this.approving && now >= this.retryAt) {
+      if (this.gate) this.askApproval(now); // only at a corner: no decision led here
+      else this.ask(now);
+    }
     if (this.state === 'DRIVING') this.drive(now, dt);
   }
 
@@ -76,9 +91,23 @@ export class Rover {
       this.retryAt = now + RETRY_MS;
       return;
     }
-    this.go(d.action);
-    this.state = 'DRIVING';
     this.reason = `0G: ${d.action}`;
+    this.go(d.action, now);
+  }
+
+  /** A `service_response_received` event for `fleet.approve`. */
+  handleApproval(event: unknown, now: number) {
+    const p = this.approving;
+    const v = acceptApproval(p, event, this.o.roster, now);
+    if (!p) return; // nothing pending: a late or replayed approval opens nothing
+    if (!v.ok) return this.deny(v.reason, now);
+    const a = v.approval;
+    this.approving = null;
+    this.log({ kind: 'approval', zone: a.zone, action: a.action, approver: a.approver, nonce: a.nonce, expires_at: a.expires_at, t_ms: now });
+    const { from, to } = this.gate!;
+    this.gate = null;
+    this.enter(from, to);
+    this.reason = `zone ${a.zone}: approved by ${a.approver}`;
   }
 
   snapshot() {
@@ -103,12 +132,39 @@ export class Rover {
     });
   }
 
+  /** Held outside a zone: ask the base for a human's approval to enter. */
+  private askApproval(now: number) {
+    const { zone } = this.gate!;
+    const nonce = randomBytes(16).toString('hex');
+    this.approving = { robot: this.o.robot, zone, nonce, deadline: now + ROVER_APPROVAL_DEADLINE_MS, provider: this.o.base };
+    if (this.state !== 'SAFE_STOPPED') this.state = 'AWAITING_APPROVAL';
+    this.o.sendApproval({ v: 1, robot: this.o.robot, episode: this.o.episode, seq: ++this.seq, action: 'enter_zone', zone, nonce })
+      .catch((e: Error) => {
+        if (this.approving?.nonce === nonce) this.deny(`mesh send failed: ${e.message}`, Date.now());
+      });
+  }
+
   private stop(reason: string, now: number) {
     this.log({ kind: 'safe_stop', seq: this.pending?.seq ?? this.seq, checkpoint: this.view?.checkpoint, reason, t_ms: now });
     this.pending = null;
     this.state = 'SAFE_STOPPED';
     this.reason = reason;
     this.retryAt = now + RETRY_MS;
+  }
+
+  /**
+   * No approval: stay outside the zone. At a checkpoint the 0G decision that
+   * led here is spent, so the retry asks 0G again (and, if it picks the zone
+   * again, a human again). Never enter later on the old decision.
+   */
+  private deny(reason: string, now: number) {
+    const { zone } = this.gate!;
+    this.log({ kind: 'denied', zone, nonce: this.approving?.nonce, reason, t_ms: now });
+    this.approving = null;
+    if (this.view) this.gate = null;
+    this.state = 'SAFE_STOPPED';
+    this.reason = `zone ${zone}: ${reason}`;
+    this.retryAt = now + APPROVAL_RETRY_MS;
   }
 
   private drive(now: number, dt: number) {
@@ -134,23 +190,34 @@ export class Rover {
   /** At node `to`: follow a corner, or hold at a junction and ask. */
   private arrive(now: number) {
     const next = nextAlong(this.from, this.to);
-    if (next) return this.follow(this.to, next);
+    if (next) return this.follow(this.to, next, now);
     this.view = junctionView(this.to, this.heading);
     this.state = 'AWAITING_DECISION';
     this.reason = `checkpoint ${this.to}`;
     this.ask(now);
   }
 
-  private go(action: Action) {
-    if (action === 'turn_around') return this.follow(this.to, this.from);
-    this.follow(this.to, exits(this.to, this.heading)[action]!); // acceptDecision only passes offered actions
+  private go(action: Action, now: number) {
+    if (action === 'turn_around') return this.follow(this.to, this.from, now);
+    this.follow(this.to, exits(this.to, this.heading)[action]!, now); // acceptDecision only passes offered actions
   }
 
-  private follow(from: string, to: string) {
+  /** Head from node `from` (where the rover is) to `to`; into a restricted zone, only after an approval. */
+  private follow(from: string, to: string, now: number) {
+    const zone = zoneOf(to);
+    if (!zone || zone === zoneOf(from)) return this.enter(from, to);
+    this.gate = { zone, from, to }; // held where it is, still at its checkpoint
+    this.state = 'AWAITING_APPROVAL';
+    this.reason = `zone ${zone} gate`;
+    this.askApproval(now);
+  }
+
+  private enter(from: string, to: string) {
     this.from = from;
     this.to = to;
     this.heading = headingTo(from, to);
     this.view = null;
+    this.state = 'DRIVING';
   }
 
   private log(e: LogEntry) {

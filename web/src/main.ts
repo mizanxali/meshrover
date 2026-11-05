@@ -4,13 +4,17 @@
 // 0G decision with its request ID and the frame the model saw).
 // Replay: the episodes anchored on Galileo, each downloaded from 0G Storage by
 // the root in its anchor and stepped through on the same map.
-import { EDGES, NODES, PALLETS } from '../../src/sim/map.ts';
+// Approvals: the base's feed on this Mac lists approvals waiting on an operator
+// (World's link and code, as a QR code for the operator's phone).
+import { renderSVG } from 'uqr';
+import { EDGES, NODES, PALLETS, ZONES } from '../../src/sim/map.ts';
 
 type Entry = {
   kind: string; seq: number; robot?: string; checkpoint?: string; action?: string; reason?: string; request_id?: string;
   pose?: { x: number; y: number; heading: number }; frame_jpeg_b64?: string; model?: string; tee_verified?: boolean;
-  verifiability?: string; t_request_ms?: number; t_decision_ms?: number;
+  verifiability?: string; t_request_ms?: number; t_decision_ms?: number; zone?: string; approver?: string;
 };
+type Card = { robot: string; zone: string; link: string; user_code: string; deadline: number };
 type Snapshot = {
   robot: string; episode: string; state: string; reason: string; x: number; y: number; heading: number;
   battery: number; seq: number; pending: number | null; recent: Entry[];
@@ -18,6 +22,7 @@ type Snapshot = {
 };
 
 const FEED = 'http://127.0.0.1:7300/events';
+const APPROVALS = 'http://127.0.0.1:7301/events';
 const RPC = 'https://evmrpc-testnet.0g.ai'; // the Galileo RPC that serves eth_getLogs (100k-block ranges)
 const ANCHOR = '0x8530Ec9B37EDc064527c5Dd20BAFE264F78cAF67'; // EpisodeAnchor
 const DEPLOY_BLOCK = 64020724;
@@ -25,7 +30,8 @@ const FLEET = '0x50074104728d49e1f57ad4abd365fde9246fda5f25d1f2384b17580c47a52b9
 const INDEXER = 'https://indexer-storage-testnet-turbo.0g.ai';
 const EXPLORER = 'https://chainscan-galileo.0g.ai';
 const S = 32; // px per metre
-const COLORS: Record<string, string> = { DRIVING: '#2e9d4f', AWAITING_DECISION: '#d89a00', SAFE_STOPPED: '#d0342c' };
+const COLORS: Record<string, string> = { DRIVING: '#2e9d4f', AWAITING_DECISION: '#d89a00', SAFE_STOPPED: '#d0342c', AWAITING_APPROVAL: '#6a4cc7' };
+const inZone = (n: string) => Object.values(ZONES).some((z) => z.includes(n));
 
 const app = document.querySelector<HTMLElement>('#app')!;
 app.innerHTML = `
@@ -40,6 +46,7 @@ app.innerHTML = `
     <aside>
       <div id="state" class="state"></div>
       <div id="reason"></div>
+      <div id="cards"></div>
       <h2>Latest 0G decision</h2>
       <dl id="decision"><dd>none yet</dd></dl>
       <img id="frame" alt="the frame the model saw" width="320" height="240">
@@ -54,13 +61,17 @@ const ctx = ($('map') as HTMLCanvasElement).getContext('2d')!;
 function draw(s: Snapshot | null) {
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
   ctx.lineCap = 'square';
-  ctx.strokeStyle = '#d6d6d6';
   ctx.lineWidth = 1.2 * S;
   for (const [a, b] of EDGES) {
     const [ax, ay] = NODES[a]!, [bx, by] = NODES[b]!;
+    ctx.strokeStyle = inZone(a) || inZone(b) ? '#ddd3f5' : '#d6d6d6';
     ctx.beginPath(); ctx.moveTo(ax * S, ay * S); ctx.lineTo(bx * S, by * S); ctx.stroke();
   }
   ctx.font = 'bold 14px system-ui';
+  for (const [z, nodes] of Object.entries(ZONES)) {
+    const x = nodes.reduce((t, n) => t + NODES[n]![0], 0) / nodes.length, y = Math.max(...nodes.map((n) => NODES[n]![1]));
+    ctx.fillStyle = '#6a4cc7'; ctx.fillText(`restricted zone ${z}`, x * S - 60, y * S + 34);
+  }
   for (const [id, [x, y]] of Object.entries(NODES)) {
     if (!id.startsWith('J')) continue;
     ctx.fillStyle = '#ffd400'; ctx.fillRect(x * S - 14, y * S - 34, 28, 18);
@@ -96,8 +107,20 @@ function render(s: Snapshot) {
   }
   $('log').innerHTML = s.recent.map((e) =>
     `<li class="${e.kind}"><b>${esc(e.kind)}</b> seq ${e.seq} ${esc(e.checkpoint ?? '')} ` +
-    (e.kind === 'decision' ? `${esc(e.action)} · <code>${esc(e.request_id)}</code>` : esc(e.reason ?? '')) + '</li>').join('');
+    (e.kind === 'decision' ? `${esc(e.action)} · <code>${esc(e.request_id)}</code>`
+      : e.kind === 'approval' ? `zone ${esc(e.zone)} · approved by ${esc(e.approver)}` : esc(e.reason ?? '')) + '</li>').join('');
 }
+
+// The approvals waiting on an operator. The link is the operator's to open; it carries no secret.
+let cards: Card[] = [];
+const showCards = () => {
+  $('cards').innerHTML = cards.map((c) => `<div class="card"><h2>${esc(c.robot)} wants to enter zone ${esc(c.zone)}</h2>` +
+    `<p>Approve with World ID, ${Math.max(0, Math.round((c.deadline - Date.now()) / 1000))} s left. Code <b>${esc(c.user_code)}</b></p>` +
+    `${renderSVG(c.link, { border: 2 })}<p><a href="${esc(c.link)}" target="_blank" rel="noreferrer">${esc(c.link)}</a></p></div>`).join('');
+};
+const approvals = new EventSource(APPROVALS);
+approvals.onmessage = (e) => { cards = JSON.parse(e.data); showCards(); };
+setInterval(() => cards.length && showCards(), 1000);
 
 draw(null);
 const feed = new EventSource(FEED);
@@ -154,6 +177,8 @@ async function replay(a: Anchor) {
     .filter((e) => KINDS.includes(e.kind));
   if (!entries.length) return void ($('conn').textContent = `${short(a.root)} holds no episode entries`);
   feed.close();
+  approvals.close();
+  $('cards').innerHTML = '';
   const episode = entries[0]!.episode ?? a.episodeId;
   const step = $('step') as HTMLInputElement;
   step.max = String(entries.length - 1);
@@ -195,9 +220,10 @@ function snapshotAt(entries: Entry[], i: number, episode: string): Snapshot {
     };
   }
   const e = entries[i]!;
-  const moving = e.kind === 'decision' && e.action !== 'stop';
+  const moving = (e.kind === 'decision' && e.action !== 'stop') || e.kind === 'approval';
+  const reason = e.kind === 'approval' ? `zone ${e.zone}: approved by ${e.approver}` : moving ? `0G: ${e.action}` : (e.reason ?? e.kind);
   return {
-    robot: e.robot ?? '', episode, state: moving ? 'DRIVING' : 'SAFE_STOPPED', reason: moving ? `0G: ${e.action}` : (e.reason ?? e.kind),
+    robot: e.robot ?? '', episode, state: moving ? 'DRIVING' : 'SAFE_STOPPED', reason,
     ...pose, battery: 0, seq: e.seq, pending: null, last, recent: entries.slice(Math.max(0, i - 7), i + 1).reverse(),
   };
 }

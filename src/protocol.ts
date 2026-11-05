@@ -114,3 +114,70 @@ export function parseDecideRequest(body: unknown): DecideRequest | null {
   if (typeof o.frame_jpeg_b64 !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(o.frame_jpeg_b64)) return null;
   return o as DecideRequest;
 }
+
+// ── Human checkpoint (World ID) and the roster ──────────────────────────────
+
+export const APPROVAL_WINDOW_MS = 120_000; // the operator's time to complete World ID
+export const APPROVAL_TTL_MS = 10_000; // an approval must be used this soon after it is issued
+// The base answers by the end of its window; the margin covers token validation and the mesh.
+export const ROVER_APPROVAL_DEADLINE_MS = APPROVAL_WINDOW_MS + 15_000;
+
+export type Role = 'robot' | 'operator' | 'supervisor' | 'base';
+export const APPROVER_ROLES: readonly Role[] = ['operator', 'supervisor'];
+/** Fleet name → role and expiry (Unix ms). An expired or missing name is no one. */
+export type Roster = Record<string, { role: Role; expiry: number }>;
+
+/** `name` may act as one of `roles` at `now`: null, or the reason it may not. Runs on the base and on the rover. */
+export function authorize(roster: Roster, name: unknown, roles: readonly Role[], now: number): string | null {
+  if (typeof name !== 'string' || !Object.hasOwn(roster, name)) return `${String(name)} is not in the fleet roster`;
+  const m = roster[name]!;
+  if (!roles.includes(m.role)) return `${name} is a ${m.role}, not ${roles.join(' or ')}`;
+  if (!(now < m.expiry)) return `${name} expired at ${new Date(m.expiry).toISOString()}`;
+  return null;
+}
+
+/** Rover → base, service `fleet.approve`, method `approve`. The nonce is the rover's, fresh per request. */
+export type ApproveRequest = { v: 1; robot: string; episode: string; seq: number; action: 'enter_zone'; zone: string; nonce: string };
+
+/** Base → rover, status `ok`: single use (it echoes the pending nonce) and short-lived. */
+export type Approval = { v: 1; robot: string; action: 'enter_zone'; zone: string; approver: string; nonce: string; expires_at: number };
+
+/** Base → rover, status `error`. */
+export type Denied = { v: 1; nonce: string; denied: string };
+
+export type PendingApproval = { robot: string; zone: string; nonce: string; deadline: number; provider: string };
+
+/**
+ * A `service_response_received` event → the approval it carries, if it is
+ * sealed, from the base, answers the pending nonce for this robot and zone,
+ * hasn't expired, and names an approver the roster allows right now.
+ */
+export function acceptApproval(pending: PendingApproval | null, event: unknown, roster: Roster, now: number):
+  { ok: true; approval: Approval } | { ok: false; reason: string } {
+  const no = (reason: string) => ({ ok: false as const, reason });
+  if (!pending) return no('no approval pending');
+  if (!isObj(event) || event.service_id !== 'fleet.approve') return no('not a fleet.approve response');
+  if (event.provider_peer_id !== pending.provider) return no('response not from the base');
+  if (event.encrypted !== true) return no('response was not sealed');
+  const r = json(event.body);
+  if (!isObj(r) || r.v !== 1) return no('malformed response');
+  if (r.nonce !== pending.nonce) return no('approval does not answer the pending request');
+  if (event.status !== 'ok') return no(typeof r.denied === 'string' ? r.denied.slice(0, 200) : `base answered ${String(event.status)}`);
+  if (r.robot !== pending.robot || r.action !== 'enter_zone' || r.zone !== pending.zone) return no('approval is for another robot, action or zone');
+  if (now > pending.deadline) return no('approval arrived after the deadline');
+  if (!Number.isSafeInteger(r.expires_at) || now > (r.expires_at as number)) return no('approval has expired');
+  if ((r.expires_at as number) - now > APPROVAL_TTL_MS) return no('approval lasts too long');
+  if (!shortStr(r.approver)) return no('approval names no approver');
+  const why = authorize(roster, r.approver, APPROVER_ROLES, now);
+  if (why) return no(why);
+  return { ok: true, approval: { v: 1, robot: pending.robot, action: 'enter_zone', zone: pending.zone, approver: r.approver, nonce: pending.nonce, expires_at: r.expires_at as number } };
+}
+
+/** A request body as the base receives it (untrusted) → an ApproveRequest, or null. */
+export function parseApproveRequest(body: unknown): ApproveRequest | null {
+  if (typeof body !== 'string' || body.length > 4096) return null;
+  const o = json(body);
+  if (!isObj(o) || o.v !== 1 || !Number.isSafeInteger(o.seq) || (o.seq as number) < 1 || o.action !== 'enter_zone') return null;
+  if (!shortStr(o.robot) || !shortStr(o.episode) || !shortStr(o.zone, 8) || typeof o.nonce !== 'string' || !/^[0-9a-f]{32}$/.test(o.nonce)) return null;
+  return { v: 1, robot: o.robot, episode: o.episode, seq: o.seq as number, action: 'enter_zone', zone: o.zone, nonce: o.nonce };
+}

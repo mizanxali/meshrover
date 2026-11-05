@@ -1,0 +1,18 @@
+{
+  "alice.meshrover-demo.eth": {
+    "role": "supervisor",
+    "expiry": 1825372800000
+  },
+  "ravi-contractor.meshrover-demo.eth": {
+    "role": "operator",
+    "expiry": 1793989800000
+  },
+  "rover-a.meshrover-demo.eth": {
+    "role": "robot",
+    "expiry": 1825372800000
+  },
+  "rover-b.meshrover-demo.eth": {
+    "role": "robot",
+    "expiry": 1825372800000
+  }
+}

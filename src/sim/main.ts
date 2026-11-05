@@ -6,6 +6,7 @@
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { type ServerResponse, createServer } from 'node:http';
 import { connectEngine } from '../engine.ts';
+import type { Roster } from '../protocol.ts';
 import { Rover } from './rover.ts';
 import { renderFrame } from './world.ts';
 
@@ -24,15 +25,22 @@ const helloId = typeof hello === 'string' ? hello : hello?.message_id;
 await engine.waitFor((e) => e.type === 'message_delivered' && e.message_id === helloId, 60_000);
 console.log(`${ROBOT} ${engine.address}: session with base ${base}, episode ${episode}`);
 
+// ponytail: the roster from a file; it will come from the base on `fleet.roster` and be cached.
+const roster: Roster = JSON.parse(readFileSync('config/roster.json', 'utf8'));
+
 const rover = new Rover({
-  robot: ROBOT, episode, base, render: renderFrame,
+  robot: ROBOT, episode, base, roster, render: renderFrame,
   send: (req) => engine.call('services.send_service_request', {
     provider: base, service_id: 'fleet.decide', method: 'decide', body: JSON.stringify(req),
+  }),
+  sendApproval: (req) => engine.call('services.send_service_request', {
+    provider: base, service_id: 'fleet.approve', method: 'approve', body: JSON.stringify(req),
   }),
   log: (e) => appendFileSync(file, JSON.stringify(e) + '\n'),
 });
 engine.on((e) => {
   if (e.type === 'service_response_received' && e.service_id === 'fleet.decide') rover.handle(e, Date.now());
+  if (e.type === 'service_response_received' && e.service_id === 'fleet.approve') rover.handleApproval(e, Date.now());
 });
 
 // The motion loop: 20 Hz, synchronous, never awaits the network.
