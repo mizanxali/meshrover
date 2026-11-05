@@ -97,7 +97,7 @@ function panel(robot: string) {
   if (p) return (sel: string) => p!.querySelector<HTMLElement>(sel)!;
   p = Object.assign(document.createElement('section'), { id, className: 'rover' });
   p.innerHTML = `<h2>${esc(robot)}</h2><div class="state"></div><div class="reason"></div>` +
-    '<h2>Latest 0G decision</h2><dl><dd>none yet</dd></dl><img alt="the frame the model saw" width="320" height="240"><h2>Log</h2><ol></ol>';
+    '<h2>Latest 0G decision</h2><dl><dd>none yet</dd></dl><img alt="the frame the model saw" height="240"><h2>Log</h2><ol></ol>';
   $('rovers').append(p);
   return (sel: string) => p!.querySelector<HTMLElement>(sel)!;
 }

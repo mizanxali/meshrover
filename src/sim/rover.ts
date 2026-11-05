@@ -26,7 +26,7 @@ type Options = {
   send: (req: DecideRequest) => Promise<unknown>;
   sendApproval: (req: ApproveRequest) => Promise<unknown>;
   log: (e: LogEntry) => void; // synchronous: an entry is on disk before the motion it leads to
-  render: (v: View) => string;
+  render: (v: View) => string; // throws when it can't see (a camera without a fresh frame): a safe-stop
   start?: { from: string; to: string }; // held at `to`, having come from `from` (default: J1, facing north)
   others?: () => readonly (readonly [number, number])[]; // where the other rovers in the warehouse are: obstacles
 };
@@ -125,8 +125,12 @@ export class Rover {
     // Another rover may have moved off since the stop: look again, so 0G sees the aisle as it is now.
     if (this.blocked === 'rover') this.view = aisleView(this.from, this.to, this.roverAhead(STOP_DISTANCE + 0.5) ? 'rover' : 'open');
     const view = this.view!;
+    try {
+      this.frame = this.o.render(view);
+    } catch (e) {
+      return this.stop((e as Error).message, now); // no frame (e.g. the camera is down): nothing to ask about
+    }
     const seq = ++this.seq;
-    this.frame = this.o.render(view);
     this.tRequest = now;
     this.pending = { seq, options: view.options, deadline: now + ROVER_DEADLINE_MS, provider: this.o.base };
     if (this.state !== 'SAFE_STOPPED') this.state = 'AWAITING_DECISION';

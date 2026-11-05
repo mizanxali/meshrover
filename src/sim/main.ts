@@ -12,14 +12,17 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { type ServerResponse, createServer } from 'node:http';
 import { connectEngine } from '../engine.ts';
 import { type Roster, parseRoster } from '../protocol.ts';
+import { cameraFeed, startFfmpeg } from './camera.ts';
 import { Rover } from './rover.ts';
-import { renderFrame } from './world.ts';
+import { type View, renderFrame } from './world.ts';
 
 // Each rover's engine (local API port, from spikes/engines.sh) and where it starts.
 const FLEET: Record<string, { port: number; start: { from: string; to: string } }> = {
   'rover-a': { port: 7202, start: { from: 'g', to: 'J1' } }, // J1, facing north
   'rover-b': { port: 7203, start: { from: 'c', to: 'J2' } }, // J2, facing north
 };
+// Rover A's safety camera (avfoundation device name). CAMERA=none: drawn frames only, as rover B has.
+const CAMERA = process.env.CAMERA ?? 'FaceTime HD Camera';
 // ponytail: provisioning by file on this Mac; the base's address will come from the ENS roster.
 const { address: base, episode } = JSON.parse(readFileSync('.run/base/fleet.json', 'utf8')) as { address: string; episode: string };
 mkdirSync(`episodes/${episode}`, { recursive: true });
@@ -31,6 +34,13 @@ async function launch(name: string) {
   const robot = `${name}.meshrover-demo.eth`;
   const file = `episodes/${episode}/${name}.jsonl`;
   const engine = await connectEngine(name, port);
+  let render = (v: View) => renderFrame(v);
+  if (name === 'rover-a' && CAMERA !== 'none') {
+    const file = `.run/${name}/cam.jpg`;
+    startFfmpeg(CAMERA, file); // warms up while the session starts
+    const cam = cameraFeed(file);
+    render = (v) => renderFrame(v, cam());
+  }
 
   // A service body to a peer with no session goes unsealed, and both sides refuse
   // those. One direct message fetches the base's key package and starts the session.
@@ -68,7 +78,7 @@ async function launch(name: string) {
   })();
 
   const rover: Rover = new Rover({
-    robot, episode, base, start, roster: () => roster, render: renderFrame,
+    robot, episode, base, start, roster: () => roster, render,
     others: () => rovers.filter((r) => r !== rover).map((r) => [r.x, r.y] as const),
     send: (req) => engine.call('services.send_service_request', {
       provider: base, service_id: 'fleet.decide', method: 'decide', body: JSON.stringify(req),

@@ -33,6 +33,7 @@ export async function checkModel(): Promise<{ model: string; verifiability: stri
 const SYSTEM = `You drive a warehouse rover. The image is its forward camera at a checkpoint.
 It shows up to three regions: LEFT, AHEAD and RIGHT. A dark opening is an aisle; orange shelving means there is no aisle that way; a brown PALLET box blocks that aisle; a blue ROVER is another robot in the way, which may move off (stop waits for it).
 proceed = drive AHEAD, turn_left = take the LEFT aisle, turn_right = take the RIGHT aisle, turn_around = go back the way you came, stop = hold here.
+Some frames also have a SAFETY CAM panel on the right: a live photo from the rover's real camera. If a hand or an object is close to the lens, covering much of the picture, choose stop, whatever the drawn view shows. A person further back (the operator at the desk) is normal.
 Never choose an aisle blocked by a pallet. If you are unsure, choose stop.
 Reply with JSON {"action": "...", "reason": "..."} only. action must be one of the options given.`;
 

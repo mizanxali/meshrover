@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The warehouse's geometry on the map (map.ts), and the rover's forward camera
-// frame at a checkpoint (signs and obstacles drawn large for the vision model).
+// frame at a checkpoint (signs and obstacles drawn large for the vision model),
+// with a real camera's picture beside it when the rover has one (camera.ts).
 // Obstacles are pallets (fixed) and other rovers (they move off again).
-import { createCanvas } from '@napi-rs/canvas';
+import { type Image, createCanvas } from '@napi-rs/canvas';
 import type { Action } from '../protocol.ts';
 import { EDGES, NODES, PALLETS, ZONES } from './map.ts';
 
@@ -67,9 +68,12 @@ export const aisleView = (from: string, to: string, ahead: 'open' | 'pallet' | '
   left: 'shelving', ahead, right: 'shelving',
 });
 
-/** A 320×240 JPEG (quality 60), base64: about 5 KB, well under the mesh's 64 KiB body cap. */
-export function renderFrame(v: View): string {
-  const c = createCanvas(320, 240);
+/**
+ * A 320×240 JPEG (quality 60), base64: about 5 KB, well under the mesh's 64 KiB
+ * body cap. With `cam`, 640×240: the safety camera's picture on the right.
+ */
+export function renderFrame(v: View, cam?: Image): string {
+  const c = createCanvas(cam ? 640 : 320, 240);
   const g = c.getContext('2d');
   g.fillStyle = '#3a3a3a'; g.fillRect(0, 0, 320, 110);
   g.fillStyle = '#9a9a9a'; g.fillRect(0, 110, 320, 130);
@@ -93,5 +97,10 @@ export function renderFrame(v: View): string {
   g.fillStyle = '#ffd400'; g.fillRect(110, 6, 100, 40);
   g.fillStyle = '#000'; g.font = 'bold 28px sans-serif';
   g.fillText(v.checkpoint, 160 - g.measureText(v.checkpoint).width / 2, 37);
+  if (cam) {
+    g.drawImage(cam, 320, 0, 320, 240);
+    g.fillStyle = '#000'; g.fillRect(320, 0, 150, 30);
+    g.fillStyle = '#fff'; g.font = 'bold 20px sans-serif'; g.fillText('SAFETY CAM', 330, 22);
+  }
   return c.toBuffer('image/jpeg', 60).toString('base64');
 }

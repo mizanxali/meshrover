@@ -201,3 +201,21 @@ test('0G turning away at the gate after a denial drives on without an approval',
   assert.equal(rover.heading, 270);
   assert.equal(approvals.length, 1);
 });
+
+test('no frame (the camera is down) means SAFE_STOPPED with nothing sent, and the retry asks once it sees again', () => {
+  let camera = false;
+  const { rover, sent, log } = rig({ render: () => { if (!camera) throw new Error('camera unavailable: no frame yet'); return 'AAAA'; } });
+  rover.start(0);
+  assert.equal(rover.state, 'SAFE_STOPPED');
+  assert.equal(sent.length, 0);
+  assert.deepEqual([log.at(-1)!.kind, log.at(-1)!.reason], ['safe_stop', 'camera unavailable: no frame yet']);
+  rover.tick(RETRY_MS - 1, 0.05);
+  assert.equal(sent.length, 0); // not before the retry
+  rover.tick(RETRY_MS, 0.05);
+  assert.equal(sent.length, 0); // still blind: stopped again
+  camera = true;
+  rover.tick(2 * RETRY_MS, 0.05);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0]!.seq, 1);
+  assert.deepEqual([rover.x, rover.y], [4, 6]); // never moved
+});
