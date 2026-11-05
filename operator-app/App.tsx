@@ -5,6 +5,10 @@
 // the base last heard it) and `fleet.approvals` (rovers waiting at a zone
 // gate). Approving opens World's link in the browser, over the phone's own
 // mobile data; the base validates the result, never this app.
+// A phone out of the Mac's Bluetooth range reaches the base through another
+// phone. The mesh line shows it: how many hops away the base answers
+// discovery from (0 direct, 1 through one relay), this phone's Bluetooth
+// links, and how many messages it has carried for others.
 import { MeshServices, OfflineProtocol } from '@offline-protocol/mesh-sdk';
 import { useEffect, useState } from 'react';
 import { Linking, PermissionsAndroid, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -17,6 +21,7 @@ const COLORS: Record<string, string> = { DRIVING: '#2e9d4f', AWAITING_DECISION: 
 // Only World's own sign-in pages: a card is shown to a human, so a link elsewhere is refused.
 const WORLD = /^https:\/\/(sandbox\.)?auth\.world\.org\//;
 const RETRY_MS = 5000;
+const MESH_MS = 15_000; // discovery again, for the base's current hop count
 
 const protocol = new OfflineProtocol({
   appId: 'meshrover',
@@ -59,11 +64,24 @@ export default function App() {
   const [rovers, setRovers] = useState<Record<string, Status>>({});
   const [cards, setCards] = useState<Card[]>([]);
   const [now, setNow] = useState(Date.now());
+  const [mesh, setMesh] = useState<{ hops?: number; links?: number; relayed?: number }>({});
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     let provider: string | null = null;
     const mine = new Set<string>(); // our subscription IDs
+
+    protocol.on('service_discovered' as any, (e: any) => {
+      if (e.service_id === 'fleet.status' && e.provider_peer_id === provider) setMesh((m) => ({ ...m, hops: e.hop_count }));
+    });
+    const meshTimer = setInterval(async () => {
+      if (!provider) return;
+      try {
+        const [links, stats] = await Promise.all([protocol.getBLePeerCount(), protocol.getMeshRelayStats()]);
+        setMesh((m) => ({ ...m, links, relayed: stats.forwarded }));
+        await services.discoverServices('fleet.status');
+      } catch {} // the line just keeps its last values
+    }, MESH_MS);
 
     protocol.on('service_update_received' as any, (e: any) => {
       if (e.provider_peer_id !== provider || !mine.has(e.sub_id)) return;
@@ -99,7 +117,10 @@ export default function App() {
         const found = next('service_discovered', (e) => e.service_id === 'fleet.status');
         while (!provider) {
           await services.discoverServices('fleet.status');
-          provider = await Promise.race([found.then((e) => e.provider_peer_id as string), sleep(RETRY_MS).then(() => null)]);
+          provider = await Promise.race([
+            found.then((e) => (setMesh((m) => ({ ...m, hops: e.hop_count })), e.provider_peer_id as string)),
+            sleep(RETRY_MS).then(() => null),
+          ]);
         }
         setBase(provider);
         // Service bodies are sealed only once a session exists; one direct message starts it.
@@ -116,7 +137,7 @@ export default function App() {
         setLink(`error: ${(err as Error).message}`);
       }
     })();
-    return () => clearInterval(t);
+    return () => (clearInterval(t), clearInterval(meshTimer));
   }, []);
 
   const ago = (ms: number) => `${Math.max(0, Math.round((now - ms) / 1000))} s ago`;
@@ -126,6 +147,12 @@ export default function App() {
         <ScrollView contentContainerStyle={s.body}>
           <Text style={s.h1}>Mesh Rover operator</Text>
           <Text style={s.dim}>Mesh over Bluetooth only · {link}{base ? ` · base ${short(base)}` : ''}</Text>
+          {base ? (
+            <Text style={s.dim}>
+              {mesh.hops === undefined ? 'base: hops not measured yet' : mesh.hops === 0 ? 'base: direct (0 hops)' : `base: ${mesh.hops} hop${mesh.hops > 1 ? 's' : ''} away, through another phone`}
+              {mesh.links === undefined ? '' : ` · ${mesh.links} Bluetooth link${mesh.links === 1 ? '' : 's'} · relayed ${mesh.relayed} for others`}
+            </Text>
+          ) : null}
 
           {cards.map((c) => (
             <View key={c.robot} style={s.card}>
