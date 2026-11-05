@@ -22,7 +22,7 @@ type Options = {
   robot: string;
   episode: string;
   base: string; // the base's mesh address: the only provider whose answers count
-  roster: Roster; // who may approve, checked again here whatever the base says
+  roster: () => Roster; // who may approve (the latest from the base), checked again here whatever the base says
   send: (req: DecideRequest) => Promise<unknown>;
   sendApproval: (req: ApproveRequest) => Promise<unknown>;
   log: (e: LogEntry) => void; // synchronous: an entry is on disk before the motion it leads to
@@ -98,7 +98,7 @@ export class Rover {
   /** A `service_response_received` event for `fleet.approve`. */
   handleApproval(event: unknown, now: number) {
     const p = this.approving;
-    const v = acceptApproval(p, event, this.o.roster, now);
+    const v = acceptApproval(p, event, this.o.roster(), now);
     if (!p) return; // nothing pending: a late or replayed approval opens nothing
     if (!v.ok) return this.deny(v.reason, now);
     const a = v.approval;

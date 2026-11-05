@@ -6,8 +6,11 @@
 // the root in its anchor and stepped through on the same map.
 // Approvals: the base's feed on this Mac lists approvals waiting on an operator
 // (World's link and code, as a QR code for the operator's phone).
+// Roster: the fleet's members as ENSv2 on Sepolia has them, read here from the chain.
 import { renderSVG } from 'uqr';
 import { EDGES, NODES, PALLETS, ZONES } from '../../src/sim/map.ts';
+import { FLEET as FLEET_NAME, SEPOLIA_RPC, readRoster, sepoliaClient } from '../../src/base/roster.ts';
+import { APPROVER_ROLES, type Roster, authorize } from '../../src/protocol.ts';
 
 type Entry = {
   kind: string; seq: number; robot?: string; checkpoint?: string; action?: string; reason?: string; request_id?: string;
@@ -54,6 +57,8 @@ app.innerHTML = `
   </div>
   <h2>Rover log</h2>
   <ol id="log"></ol>
+  <h2>Fleet roster <small>${FLEET_NAME} on ENSv2 (Sepolia), read from the chain</small></h2>
+  <table id="roster"><tr><td>loading…</td></tr></table>
   <h2>Anchored episodes <small>EpisodeAnchor on 0G Galileo · files on 0G Storage</small></h2>
   <table id="anchors"><tr><td>loading…</td></tr></table>`;
 const $ = (id: string) => document.getElementById(id)!;
@@ -227,3 +232,37 @@ function snapshotAt(entries: Entry[], i: number, episode: string): Snapshot {
     ...pose, battery: 0, seq: e.seq, pending: null, last, recent: entries.slice(Math.max(0, i - 7), i + 1).reverse(),
   };
 }
+
+// ---- The roster from ENS ----
+
+/** The address an invite carries, for display: version, flags, a 32-byte key, then the address with its length. */
+function inviteAddress(blob: string): Promise<string> {
+  const b = Uint8Array.from(atob(blob.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+  const address = new TextDecoder().decode(b.slice(35, 35 + (b[34] ?? 0)));
+  return b[0] === 1 && address.startsWith('off1') ? Promise.resolve(address) : Promise.reject(new Error('not an invite'));
+}
+
+const ens = sepoliaClient();
+let members: Roster = {};
+const contexts: Record<string, string | null> = {};
+function showRoster() {
+  const now = Date.now();
+  $('roster').innerHTML = '<tr><th>name</th><th>role</th><th>expires</th><th>mesh key (invite)</th><th>may approve</th><th>agent-context</th></tr>' +
+    Object.entries(members).map(([name, m]) => {
+      const may = authorize(members, name, APPROVER_ROLES, now);
+      return `<tr><td>${esc(name)}</td><td>${esc(m.role ?? '(unset)')}</td>` +
+        `<td${now < m.expiry ? '' : ' style="color:#d0342c"'}>${new Date(m.expiry).toLocaleString()}${now < m.expiry ? '' : ' (expired)'}</td>` +
+        `<td><code>${m.address ? short(m.address) : '—'}</code></td><td>${may ? (m.role === 'robot' || m.role === 'base' ? '—' : `no: ${esc(may)}`) : 'yes'}</td>` +
+        `<td>${esc(contexts[name] ?? '')}</td></tr>`;
+    }).join('');
+}
+async function loadRoster() {
+  members = await readRoster(ens, inviteAddress, members);
+  await Promise.all(Object.entries(members).filter(([, m]) => m.role === 'robot').map(async ([name]) => {
+    contexts[name] = await ens.getEnsText({ name, key: 'agent-context' });
+  }));
+  showRoster();
+}
+const rosterFailed = (e: Error) => { $('roster').innerHTML = `<tr><td>could not read the roster from ${SEPOLIA_RPC}: ${esc(e.message.split('\n')[0])}</td></tr>`; };
+loadRoster().catch(rosterFailed);
+setInterval(() => loadRoster().catch(() => showRoster()), 60_000); // keep the last read if a refresh fails

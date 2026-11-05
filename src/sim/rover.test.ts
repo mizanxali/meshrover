@@ -14,7 +14,7 @@ function rig() {
   const approvals: ApproveRequest[] = [];
   const log: LogEntry[] = [];
   const rover = new Rover({
-    robot: 'rover-a', episode: 'ep-t', base: BASE, roster: ROSTER, render: () => 'AAAA',
+    robot: 'rover-a', episode: 'ep-t', base: BASE, roster: () => ROSTER, render: () => 'AAAA',
     send: async (r) => void sent.push(r), sendApproval: async (r) => void approvals.push(r), log: (e) => void log.push(e),
   });
   const answer = (seq: number, action: string, now: number) =>

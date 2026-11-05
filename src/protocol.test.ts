@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  APPROVAL_TTL_MS, type PendingApproval, type Pending, type Roster, acceptApproval, acceptDecision, authorize, parseApproveRequest,
+  APPROVAL_TTL_MS, type PendingApproval, type Pending, type Roster, acceptApproval, acceptDecision, authorize, parseApproveRequest, parseRoster,
   parseDecideRequest, parseDecision,
 } from './protocol.ts';
 
@@ -96,7 +96,8 @@ test('parseDecideRequest takes a well-formed request and rejects malformed ones'
 const roster: Roster = {
   'alice.meshrover-demo.eth': { role: 'supervisor', expiry: 50_000 },
   'ravi-contractor.meshrover-demo.eth': { role: 'operator', expiry: 1_000 },
-  'rover-a.meshrover-demo.eth': { role: 'robot', expiry: 50_000 },
+  'rover-a.meshrover-demo.eth': { role: 'robot', expiry: 50_000, address: 'off1rovera' },
+  'gone.meshrover-demo.eth': { expiry: 50_000 }, // its role record unreadable
 };
 const APPROVERS = ['operator', 'supervisor'] as const;
 
@@ -108,6 +109,30 @@ test('authorize allows a listed name with the right role before its expiry, and 
   assert.match(authorize(roster, 'mallory.meshrover-demo.eth', APPROVERS, 0)!, /not in the fleet roster/);
   assert.match(authorize(roster, 'toString', APPROVERS, 0)!, /not in the fleet roster/); // no prototype keys
   assert.match(authorize(roster, undefined, APPROVERS, 0)!, /not in the fleet roster/);
+  assert.match(authorize(roster, 'gone.meshrover-demo.eth', APPROVERS, 0)!, /without a role record/);
+  assert.match(authorize({ ...roster, 'ravi-contractor.meshrover-demo.eth': { expiry: 1_000 } }, 'ravi-contractor.meshrover-demo.eth', APPROVERS, 1_000)!, /expired/);
+});
+
+test('authorize with a key allows only the mesh address ENS lists for that name', () => {
+  assert.equal(authorize(roster, 'rover-a.meshrover-demo.eth', ['robot'], 0, 'off1rovera'), null);
+  assert.match(authorize(roster, 'rover-a.meshrover-demo.eth', ['robot'], 0, 'off1mallory')!, /not rover-a.meshrover-demo.eth's key/);
+  assert.match(authorize(roster, 'alice.meshrover-demo.eth', ['supervisor'], 0, 'off1rovera')!, /not alice/); // no invite record: no key
+});
+
+test('parseRoster takes a well-formed roster and refuses anything else', () => {
+  const good = { 'rover-a.meshrover-demo.eth': { role: 'robot', expiry: 5, address: 'off1qxzpjpvljhh5qra4zayksypvqx5p6wuahcer6jcx' }, 'gone.meshrover-demo.eth': { expiry: 0 } };
+  assert.deepEqual(parseRoster(JSON.stringify(good)), good);
+  for (const bad of [
+    null, [], 'x',
+    { 'Rover.eth': { role: 'robot', expiry: 5 } },
+    { 'rover-a.eth': { role: 'admin', expiry: 5 } },
+    { 'rover-a.eth': { role: 'robot', expiry: 1.5 } },
+    { 'rover-a.eth': { role: 'robot' } },
+    { 'rover-a.eth': { role: 'robot', expiry: 5, address: 'mallory' } },
+  ]) assert.equal(parseRoster(JSON.stringify(bad)), null, JSON.stringify(bad));
+  assert.equal(parseRoster('{"__proto__": {"expiry": 5}}'), null);
+  assert.equal(parseRoster('{'), null);
+  assert.equal(parseRoster(42), null);
 });
 
 const NONCE = 'ab'.repeat(16);

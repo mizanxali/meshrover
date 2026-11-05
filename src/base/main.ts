@@ -7,11 +7,14 @@
 // Operators' phones subscribe over the mesh (BLE to this engine) to
 // `fleet.status` (each rover's state, as the base last heard it) and
 // `fleet.approvals` (the same cards), so they keep working with no internet.
+// The fleet roster comes from ENSv2 on Sepolia, is cached in
+// .run/base/roster.json, and goes to the rovers on `fleet.roster`; the base
+// answers only robots whose mesh key the roster lists.
 // Ctrl-C ends the episode: the base refuses further decisions, then records
 // the file on 0G Storage and anchors it on Galileo (retrying while offline).
 // Run: npm run base   (engines up; ZG_API_KEY, KEYSTORE_PASSWORD in .env; EPISODE optional)
 import { createHash } from 'node:crypto';
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { type ServerResponse, createServer } from 'node:http';
 import {
   APPROVAL_TTL_MS, APPROVER_ROLES, type Approval, type DecideError, type DecideResponse, type Denied, type Roster, authorize,
@@ -20,6 +23,7 @@ import {
 import { type EngineEvent, connectEngine } from '../engine.ts';
 import { MOCK, checkModel, decide } from './decide.ts';
 import { loadSigner, record } from './record.ts';
+import { FLEET, readRoster, sepoliaClient } from './roster.ts';
 import { type Card, operatorOf, verifyHuman } from './world.ts';
 
 process.loadEnvFile();
@@ -41,9 +45,10 @@ console.log(`0G model ${model} (${verifiability})`);
 const engine = await connectEngine('base', 7201);
 await engine.call('services.register_service', { service_id: 'fleet.decide', version: '1', capabilities: {} });
 await engine.call('services.register_service', { service_id: 'fleet.approve', version: '1', capabilities: {} });
-for (const service_id of ['fleet.status', 'fleet.approvals']) {
+for (const service_id of ['fleet.status', 'fleet.approvals', 'fleet.roster']) {
   await engine.call('services.register_service', { service_id, version: '1', capabilities: {} });
-  // ponytail: any sealed peer may watch; restrict to the roster's operator keys (Rules, allow_peers) once the roster has them.
+  // ponytail: any sealed peer may watch (the roster is public on ENS anyway); restrict status and approvals to
+  // operators' keys (Rules, allow_peers) once their phones' invites are in ENS.
   await engine.call('services.set_service_subscription_policy', { service_id, policy: { kind: 'AcceptAll' } });
 }
 const publish = (service_id: string, topic: string, key: string, body: object) =>
@@ -52,8 +57,35 @@ const publish = (service_id: string, topic: string, key: string, body: object) =
 /** What the base last heard of a robot, for the operators' phones. It's the base's view: between checkpoints it hears nothing. */
 const tell = (robot: string, state: string, reason: string, extra: object = {}) =>
   void publish('fleet.status', 'rovers', robot, { robot, episode, state, reason, ...extra, t_ms: Date.now() });
-// ponytail: the roster from a file; it will be read from the fleet's ENSv2 names and cached.
-const roster: Roster = JSON.parse(readFileSync('config/roster.json', 'utf8'));
+
+// The roster: the cache first, so the base works offline, then ENS every minute. Requests never wait on a read.
+const ROSTER_CACHE = '.run/base/roster.json';
+let roster: Roster = existsSync(ROSTER_CACHE) ? JSON.parse(readFileSync(ROSTER_CACHE, 'utf8')) : {};
+const ens = sepoliaClient(process.env.SEPOLIA_RPC || undefined);
+const parseInvite = async (blob: string) => (await engine.call('parse_invite', { blob })).address as string;
+let ensError = '';
+async function refreshRoster() {
+  try {
+    const next = await readRoster(ens, parseInvite, roster);
+    ensError = '';
+    if (JSON.stringify(next) === JSON.stringify(roster)) return;
+    roster = next;
+    writeFileSync(ROSTER_CACHE, JSON.stringify(roster, null, 2));
+    void publish('fleet.roster', 'roster', 'fleet', roster);
+    console.log('roster from ENS:');
+    for (const [name, m] of Object.entries(roster)) console.log(`  ${name} ${m.role ?? '(no role)'} until ${new Date(m.expiry).toISOString()} ${m.address ?? '(no key)'}`);
+  } catch (err) {
+    const msg = (err as { shortMessage?: string }).shortMessage ?? (err as Error).message;
+    if (msg !== ensError) console.error(`roster: ENS unreachable, keeping the cached roster (${msg.split('\n')[0]})`);
+    ensError = msg;
+  }
+}
+await refreshRoster();
+if (!Object.keys(roster).length) throw new Error(`no roster: ENS unreachable and no ${ROSTER_CACHE}`);
+void publish('fleet.roster', 'roster', 'fleet', roster); // a restarted provider holds no topics
+setInterval(refreshRoster, 60_000);
+const baseWhy = authorize(roster, `base.${FLEET}`, ['base'], Date.now(), engine.address);
+if (baseWhy) console.warn(`ENS doesn't list this engine as the base: ${baseWhy} (eval "$(npm run -s invites)", then Fleet.s.sol records())`);
 // ponytail: provisioning by file on this Mac; rovers will take the base's address from the ENS roster instead.
 writeFileSync('.run/base/fleet.json', JSON.stringify({ address: engine.address, episode }));
 console.log(`base ${engine.address}, episode ${episode}, writing ${file}`);
@@ -87,10 +119,11 @@ async function onDecide(e: EngineEvent) {
     return respond('error', { v: 1, seq, error });
   };
 
-  // ponytail: any sealed sender may ask; checking the sender against the ENS roster comes with the roster.
   if (e.encrypted !== true) return refuse('request was not sealed');
   if (!req) return refuse('malformed request');
   if (req.episode !== episode) return refuse(`wrong episode ${req.episode}, base is on ${episode}`);
+  const robotWhy = authorize(roster, req.robot, ['robot'], t_request_ms, e.sender);
+  if (robotWhy) return refuse(robotWhy);
 
   tell(req.robot, 'AWAITING_DECISION', `checkpoint ${req.checkpoint}`, { checkpoint: req.checkpoint, seq });
   const d = await decide(req, KEY, verifiability);
@@ -143,7 +176,7 @@ async function onApprove(e: EngineEvent) {
   const deny = (denied: string, extra: object = {}) => {
     if (ended) return respond('error', { v: 1, nonce, denied: 'episode ended' });
     log({ kind: 'denied', robot: req?.robot, sender: e.sender, seq: req?.seq, zone: req?.zone, nonce, reason: denied, ...extra, t_request_ms, t_ms: Date.now() });
-    if (req && !authorize(roster, req.robot, ['robot'], Date.now())) tell(req.robot, 'SAFE_STOPPED', `zone ${req.zone}: ${denied}`, { zone: req.zone });
+    if (req && !authorize(roster, req.robot, ['robot'], Date.now(), e.sender)) tell(req.robot, 'SAFE_STOPPED', `zone ${req.zone}: ${denied}`, { zone: req.zone });
     console.log(`${req?.robot ?? e.sender} zone ${req?.zone}: denied, ${denied}`);
     return respond('error', { v: 1, nonce, denied });
   };
@@ -151,7 +184,7 @@ async function onApprove(e: EngineEvent) {
   if (e.encrypted !== true) return deny('request was not sealed');
   if (!req) return deny('malformed request');
   if (req.episode !== episode) return deny(`wrong episode ${req.episode}, base is on ${episode}`);
-  const robotWhy = authorize(roster, req.robot, ['robot'], t_request_ms);
+  const robotWhy = authorize(roster, req.robot, ['robot'], t_request_ms, e.sender);
   if (robotWhy) return deny(robotWhy);
 
   console.log(`${req.robot} at zone ${req.zone} gate: waiting for World ID`);

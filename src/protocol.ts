@@ -122,18 +122,42 @@ export const APPROVAL_TTL_MS = 10_000; // an approval must be used this soon aft
 // The base answers by the end of its window; the margin covers token validation and the mesh.
 export const ROVER_APPROVAL_DEADLINE_MS = APPROVAL_WINDOW_MS + 15_000;
 
-export type Role = 'robot' | 'operator' | 'supervisor' | 'base';
+export const ROLES = ['robot', 'operator', 'supervisor', 'base'] as const;
+export type Role = (typeof ROLES)[number];
 export const APPROVER_ROLES: readonly Role[] = ['operator', 'supervisor'];
-/** Fleet name → role and expiry (Unix ms). An expired or missing name is no one. */
-export type Roster = Record<string, { role: Role; expiry: number }>;
+/**
+ * Fleet name → expiry (Unix ms), role and mesh address, as ENS has them. An
+ * expired name's records read as unset on chain, so its role may be unknown;
+ * a name with no role is never authorized.
+ */
+export type Roster = Record<string, { expiry: number; role?: Role; address?: string }>;
 
-/** `name` may act as one of `roles` at `now`: null, or the reason it may not. Runs on the base and on the rover. */
-export function authorize(roster: Roster, name: unknown, roles: readonly Role[], now: number): string | null {
+/**
+ * `name` may act as one of `roles` at `now` (and, given `key`, `key` is its
+ * mesh address): null, or the reason it may not. Runs on the base and on the rover.
+ */
+export function authorize(roster: Roster, name: unknown, roles: readonly Role[], now: number, key?: string): string | null {
   if (typeof name !== 'string' || !Object.hasOwn(roster, name)) return `${String(name)} is not in the fleet roster`;
   const m = roster[name]!;
-  if (!roles.includes(m.role)) return `${name} is a ${m.role}, not ${roles.join(' or ')}`;
   if (!(now < m.expiry)) return `${name} expired at ${new Date(m.expiry).toISOString()}`;
+  if (!m.role || !roles.includes(m.role)) return `${name} is ${m.role ? `a ${m.role}` : 'without a role record'}, not ${roles.join(' or ')}`;
+  if (key !== undefined && m.address !== key) return `${key} is not ${name}'s key`;
   return null;
+}
+
+/** A roster as the rover receives it on `fleet.roster` → a Roster, or null. */
+export function parseRoster(body: unknown): Roster | null {
+  if (typeof body !== 'string' || body.length > MAX_BODY) return null;
+  const o = json(body);
+  if (!isObj(o)) return null;
+  const out: Roster = {};
+  for (const [name, m] of Object.entries(o)) {
+    if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(name) || name.length > 255 || !isObj(m) || !Number.isSafeInteger(m.expiry)) return null;
+    if (m.role !== undefined && !ROLES.includes(m.role as Role)) return null;
+    if (m.address !== undefined && !(typeof m.address === 'string' && /^off1[0-9a-z]{20,90}$/.test(m.address))) return null;
+    out[name] = { expiry: m.expiry as number, ...(m.role ? { role: m.role as Role } : {}), ...(m.address ? { address: m.address as string } : {}) };
+  }
+  return out;
 }
 
 /** Rover → base, service `fleet.approve`, method `approve`. The nonce is the rover's, fresh per request. */

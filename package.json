@@ -13,7 +13,8 @@
     "sim": "tsx src/sim/main.ts",
     "web": "npm --prefix web run dev",
     "record": "tsx src/base/record.ts",
-    "enroll": "tsx src/base/world.ts"
+    "enroll": "tsx src/base/world.ts",
+    "invites": "tsx src/base/invites.ts"
   },
   "devDependencies": {
     "@types/node": "^24",
