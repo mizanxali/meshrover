@@ -5,6 +5,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Mesh Rover</title>
+    <style>
+      body { font: 15px/1.4 system-ui, sans-serif; margin: 24px; color: #111; }
+      h1 small { font-size: 14px; font-weight: normal; color: #666; }
+      h2 { font-size: 15px; margin: 16px 0 6px; }
+      .row { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+      canvas { background: #f4f4f4; border-radius: 8px; }
+      aside { width: 360px; }
+      .state { color: #fff; font-size: 24px; font-weight: bold; padding: 8px 12px; border-radius: 6px; }
+      dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0; }
+      dt { color: #666; } dd { margin: 0; overflow-wrap: anywhere; }
+      img { margin-top: 12px; border-radius: 6px; background: #ddd; }
+      ol { padding-left: 20px; } li.safe_stop b { color: #d0342c; } li.decision b { color: #2e9d4f; }
+      code { font-size: 12px; }
+    </style>
   </head>
   <body>
     <main id="app"></main>
