@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "base": "tsx src/base/main.ts",
     "sim": "tsx src/sim/main.ts",
-    "web": "npm --prefix web run dev"
+    "web": "npm --prefix web run dev",
+    "record": "tsx src/base/record.ts"
   },
   "devDependencies": {
     "@types/node": "^24",

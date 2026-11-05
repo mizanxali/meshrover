@@ -1,26 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The warehouse: aisles as a graph in metres (x east, y south), three
-// junctions, pallets blocking two aisles, and the rover's forward camera frame
-// at a checkpoint (signs and obstacles drawn large for the vision model).
+// The warehouse's geometry on the map (map.ts), and the rover's forward camera
+// frame at a checkpoint (signs and obstacles drawn large for the vision model).
 import { createCanvas } from '@napi-rs/canvas';
 import type { Action } from '../protocol.ts';
+import { EDGES, NODES, PALLETS } from './map.ts';
 
-//  a(4,2)────────b(12,2)
-//   │             │
-//  J1(4,6)──▣───J2(12,6)──▣───J3(20,6)────e(24,6)
-//   │             │             │            │
-//   │           c(12,10)─────d(20,10)        │
-//   │                                        │
-//  g(4,14)──────────────────────────────────f(24,14)
-export const NODES: Record<string, readonly [number, number]> = {
-  J1: [4, 6], J2: [12, 6], J3: [20, 6],
-  a: [4, 2], b: [12, 2], c: [12, 10], d: [20, 10], e: [24, 6], f: [24, 14], g: [4, 14],
-};
-export const EDGES: readonly (readonly [string, string])[] = [
-  ['J1', 'J2'], ['J2', 'J3'], ['J1', 'a'], ['a', 'b'], ['b', 'J2'], ['J2', 'c'],
-  ['c', 'd'], ['d', 'J3'], ['J3', 'e'], ['e', 'f'], ['f', 'g'], ['g', 'J1'],
-];
-export const PALLETS: readonly (readonly [number, number])[] = [[6.5, 6], [14.5, 6]];
+export { EDGES, NODES, PALLETS };
 export const STOP_DISTANCE = 1.5; // the motion loop halts this far short of a pallet
 
 const at = (id: string) => NODES[id] ?? (() => { throw new Error(`no node ${id}`); })();

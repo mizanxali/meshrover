@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The base: drives its own engine, provides `fleet.decide` over the mesh, asks
 // 0G for each decision and writes the episode file (JSONL, frames included).
-// Run: npm run base   (engines up; ZG_API_KEY in .env; EPISODE optional)
+// Ctrl-C ends the episode: the base refuses further decisions, then records
+// the file on 0G Storage and anchors it on Galileo (retrying while offline).
+// Run: npm run base   (engines up; ZG_API_KEY, KEYSTORE_PASSWORD in .env; EPISODE optional)
 import { createHash } from 'node:crypto';
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { type DecideError, type DecideResponse, parseDecideRequest } from '../protocol.ts';
 import { type EngineEvent, connectEngine } from '../engine.ts';
 import { MOCK, checkModel, decide } from './decide.ts';
+import { loadSigner, record } from './record.ts';
 
 process.loadEnvFile();
 const KEY = process.env.ZG_API_KEY || (() => { throw new Error('ZG_API_KEY missing from .env'); })();
@@ -20,6 +23,7 @@ mkdirSync(`episodes/${episode}`, { recursive: true });
 const file = `episodes/${episode}/base.jsonl`;
 const log = (e: object) => appendFileSync(file, JSON.stringify({ episode, ...e }) + '\n');
 
+const wallet = MOCK ? null : await loadSigner(); // a mock episode is never recorded
 const { model, verifiability } = await checkModel();
 console.log(`0G model ${model} (${verifiability})`);
 
@@ -33,6 +37,15 @@ engine.on((e) => {
   if (e.type === 'service_request_received' && e.service_id === 'fleet.decide') void onDecide(e);
 });
 
+// Once ended, the file is final: nothing more is logged, so no decision goes out either (it would move a rover unlogged).
+let ended = false;
+process.once('SIGINT', async () => {
+  ended = true;
+  console.log(`\nepisode ${episode} ended${wallet ? ', recording it (Ctrl-C again to stop; npm run record -- ' + episode + ' resumes)' : ''}`);
+  if (wallet) await record(episode, wallet).catch((e: Error) => console.error(`not recorded: ${e.message}`));
+  process.exit(0);
+});
+
 async function onDecide(e: EngineEvent) {
   const t_request_ms = Date.now();
   const req = parseDecideRequest(e.body);
@@ -41,6 +54,7 @@ async function onDecide(e: EngineEvent) {
     engine.call('services.respond_to_service_request', {
       request_id: e.request_id, requester: e.sender, service_id: 'fleet.decide', status, body: JSON.stringify(body),
     }).catch((err: Error) => console.error(`respond seq ${seq}: ${err.message}`));
+  if (ended) return respond('error', { v: 1, seq, error: 'episode ended' });
   const refuse = (error: string) => {
     log({ kind: 'rejected_command', sender: e.sender, seq, reason: error, t_ms: t_request_ms });
     console.log(`refused ${e.sender} seq ${seq}: ${error}`);
@@ -53,6 +67,7 @@ async function onDecide(e: EngineEvent) {
   if (req.episode !== episode) return refuse(`wrong episode ${req.episode}, base is on ${episode}`);
 
   const d = await decide(req, KEY, verifiability);
+  if (ended) return respond('error', { v: 1, seq, error: 'episode ended' });
   const t_decision_ms = Date.now();
   const common = {
     robot: req.robot, seq, checkpoint: req.checkpoint, options: req.options, pose: req.pose,

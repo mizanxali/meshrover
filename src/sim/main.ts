@@ -7,7 +7,7 @@ import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { type ServerResponse, createServer } from 'node:http';
 import { connectEngine } from '../engine.ts';
 import { Rover } from './rover.ts';
-import { EDGES, NODES, PALLETS, renderFrame } from './world.ts';
+import { renderFrame } from './world.ts';
 
 const ROBOT = 'rover-a.meshrover-demo.eth';
 // ponytail: provisioning by file on this Mac; the base's address will come from the ENS roster.
@@ -54,7 +54,6 @@ const clients = new Set<ServerResponse>();
 createServer((req, res) => {
   if (req.url !== '/events') return void res.writeHead(404).end();
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', 'access-control-allow-origin': '*' });
-  res.write(`event: map\ndata: ${JSON.stringify({ nodes: NODES, edges: EDGES, pallets: PALLETS })}\n\n`);
   clients.add(res);
   req.on('close', () => clients.delete(res));
 }).listen(7300, '127.0.0.1');
