@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-only
 // Rover A's safety camera: the Mac's webcam through ffmpeg (avfoundation),
 // two frames a second written atomically to a file, decoded in the background.
 // `latest()` is synchronous, so the motion loop never waits on the camera, and

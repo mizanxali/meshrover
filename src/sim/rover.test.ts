@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-only
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { type ApproveRequest, type DecideRequest, ROVER_APPROVAL_DEADLINE_MS, ROVER_DEADLINE_MS, type Roster } from '../protocol.ts';

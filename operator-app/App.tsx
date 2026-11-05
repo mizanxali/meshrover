@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-only
 // The operator's phone. It joins the fleet's mesh over Bluetooth only (the
 // base engine is the one peer in range) and needs no internet for that:
 // it finds the base by service discovery, opens a sealed session with one

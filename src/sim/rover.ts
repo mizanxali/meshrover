@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-only
 // One simulated rover: the 20 Hz motion loop and the decision state machine.
 // `tick` never awaits: a checkpoint fires its request and the loop keeps
 // ticking. Only a decision that `acceptDecision` passes sets the rover moving,

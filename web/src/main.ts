@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-only
 // Public data only: no secrets, no World `sub` values.
 // Live view: the sim's feed on this Mac (map, each rover's pose and state, its
 // latest 0G decision with the request ID and the frame the model saw).

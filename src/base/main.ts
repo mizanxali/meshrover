@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-only
 // The base: drives its own engine, provides `fleet.decide` over the mesh, asks
 // 0G for each decision and writes the episode file (JSONL, frames included).
 // It also provides `fleet.approve`: a World ID check by an enrolled operator

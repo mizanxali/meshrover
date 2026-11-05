@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-only
 // A local stand-in for the 0G Router, for building while 0G is down.
 // Development only: it is not 0G, it attests nothing, and the base uses it only
 // when started with ZG_ROUTER_URL pointing here (never as a fallback). The base

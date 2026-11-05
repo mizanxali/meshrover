@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-only
 // The warehouse's geometry on the map (map.ts), and the rover's forward camera
 // frame at a checkpoint (signs and obstacles drawn large for the vision model),
 // with a real camera's picture beside it when the rover has one (camera.ts).

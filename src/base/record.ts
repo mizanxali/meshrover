@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-only
 // The record, written after an episode ends: the episode file goes to 0G
 // Storage, then its root and counts go to EpisodeAnchor on Galileo. No rover
 // reads either. Offline, it retries until the internet is back. Progress is

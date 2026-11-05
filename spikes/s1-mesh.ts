@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-only
 // S1: drive three engines (spikes/engines.sh) through the local API.
 // Rover B (peers only with A) calls fleet.decide on the base; we check the
 // request reaches the base, the sender is B's address, the response comes back,

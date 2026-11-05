@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-only
 // S5 read-back: the fleet's text records through viem's built-in Sepolia
 // Universal Resolver (no universalResolverAddress override).
 // Run: npx tsx spikes/s5-read.ts [rpc-url]   (default: public Sepolia; pass http://127.0.0.1:8545 for an anvil fork)

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-only
 // S3 (storage half): upload a small JSONL to 0G Storage on Galileo, then read
 // it back by root over the indexer's plain HTTP (what a browser would do) and
 // through the SDK. The signer is the Foundry keystore `base`, decrypted here.

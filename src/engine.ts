@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-only
 // A client for one offline-protocol-service engine's local API: JSON-RPC 2.0
 // over a WebSocket on loopback. Events arrive as notifications whose params
 // are the event object. The token is the one the engine wrote at startup.

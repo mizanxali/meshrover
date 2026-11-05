@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-only -->
 # World ID Agent Pass: integration debrief
 
 How Mesh Rover uses it: before a rover enters restricted zone C, the base runs

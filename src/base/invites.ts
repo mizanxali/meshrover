@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-only
 // Prints each engine's mesh invite as shell exports, for the `invite`
 // records that contracts/script/Fleet.s.sol writes. The invites carry only
 // public keys and addresses.

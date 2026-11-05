@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: AGPL-3.0-only
 # Three engines on loopback. base <- rover-a <- rover-b (B peers only with A).
 # Peer streams on 71xx, local API (TCP) on 72xx, tokens in .run/<name>/token.
 # Only the base has BLE on (central and peripheral), so a phone reaches a rover

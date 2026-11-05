@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-only
 const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
 
 /**

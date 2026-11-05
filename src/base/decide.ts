@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-only
 // One decision from a 0G vision model through the Router, in `verified` trust
 // mode. Anything short of a TEE-verified reply naming an offered action is an
 // error, never a guess: the rover stops.

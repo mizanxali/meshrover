@@ -1,4 +1,3 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-only -->
 # Mesh Rover operator app
 
 The operator's phone: rover status and approval cards from the base, over

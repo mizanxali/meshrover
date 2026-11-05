@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-only
 // S2: ten decisions per model through the 0G Router, in `verified` trust mode.
 // Records latency p50/p95, request_id presence, tee_verified, request_id vs
 // ZG-Res-Key, valid-JSON rate, and whether response_format json_object works.

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-only
 // S4: World ID device flow end to end. Prints the link to open on a phone,
 // polls the token endpoint, validates the ID token, prints acr/amr/auth_time.
 // Never prints `sub`. Run: npx tsx spikes/s4-world.ts [acr]

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-only
 // The human checkpoint: World ID Agent Pass's device flow, run and validated
 // entirely on the base (the client secret never leaves it). The operator opens
 // the link on their own phone; the base polls, then checks the ID token itself:

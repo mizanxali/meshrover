@@ -2,7 +2,6 @@
   "name": "meshrover-web",
   "private": true,
   "type": "module",
-  "license": "AGPL-3.0-only",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

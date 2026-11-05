@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-only
 pragma solidity ^0.8.24;
 
 /// One record per finished episode: where its log lives on 0G Storage and what it holds.

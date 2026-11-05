@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-only
 // The sim: rover-a and rover-b in one warehouse, each on its own engine. A
 // rover reaches the base only over the mesh: rover-b's engine peers only with
 // rover-a's, so everything rover-b sends relays through rover-a. They share

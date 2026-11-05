@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-only
 // The warehouse map, shared by the sim and the dashboard (which needs it to
 // replay an episode with no sim running): aisles as a graph in metres (x east,
 // y south), three junctions, pallets blocking two aisles, and restricted zone C

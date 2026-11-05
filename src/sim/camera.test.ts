@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-only
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

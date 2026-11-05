@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-only
 // The fleet roster, read from ENSv2 on Sepolia. Our text record keys sit
 // under the fleet name reversed (ENSIP-5 service keys): `eth.meshrover-demo.*`.
 // The fleet name's `members` record lists the labels; it is only an index. For

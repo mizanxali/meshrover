@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: AGPL-3.0-only
 // Message types shared by the base and the rovers, and the pure checks the
 // safe-stop rules depend on. Anything these checks reject leaves the rover in
 // SAFE_STOPPED: there is no default action and no fallback decision.
