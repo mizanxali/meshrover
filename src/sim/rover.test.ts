@@ -9,13 +9,13 @@ const ROSTER: Roster = {
   'alice.meshrover-demo.eth': { role: 'supervisor', expiry: Infinity },
   'ravi-contractor.meshrover-demo.eth': { role: 'operator', expiry: 0 },
 };
-function rig() {
+function rig(more: Partial<ConstructorParameters<typeof Rover>[0]> = {}) {
   const sent: DecideRequest[] = [];
   const approvals: ApproveRequest[] = [];
   const log: LogEntry[] = [];
   const rover = new Rover({
     robot: 'rover-a', episode: 'ep-t', base: BASE, roster: () => ROSTER, render: () => 'AAAA',
-    send: async (r) => void sent.push(r), sendApproval: async (r) => void approvals.push(r), log: (e) => void log.push(e),
+    send: async (r) => void sent.push(r), sendApproval: async (r) => void approvals.push(r), log: (e) => void log.push(e), ...more,
   });
   const answer = (seq: number, action: string, now: number) =>
     rover.handle({
@@ -101,6 +101,34 @@ test('a pallet ahead halts the motion loop and asks with turn_around', () => {
   assert.equal(rover.state, 'AWAITING_DECISION');
   assert.ok(rover.x <= 6.5 - 1.5 + 1e-9);
   assert.deepEqual(sent.at(-1)!.options, ['turn_around', 'stop']);
+});
+
+test('another rover ahead halts the motion loop; proceed is offered only once it has moved off', () => {
+  const other: [number, number][] = [[4, 3]]; // in the aisle north of J1
+  const { rover, sent, answer } = rig({ others: () => other });
+  rover.start(0);
+  answer(1, 'proceed', 100);
+  let t = 150;
+  for (; rover.state === 'DRIVING' && t < 5000; t += 50) rover.tick(t, 0.05);
+  assert.equal(rover.state, 'AWAITING_DECISION');
+  assert.ok(rover.y >= 3 + 1.5 - 1e-9);
+  assert.deepEqual(sent.at(-1)!.options, ['turn_around', 'stop']);
+  answer(sent.at(-1)!.seq, 'stop', (t += 100));
+  other[0] = [12, 2]; // gone
+  rover.tick((t += RETRY_MS), 0.05);
+  assert.deepEqual(sent.at(-1)!.options, ['proceed', 'turn_around', 'stop']);
+  answer(sent.at(-1)!.seq, 'proceed', (t += 100));
+  const y = rover.y;
+  rover.tick((t += 50), 0.5);
+  assert.equal(rover.state, 'DRIVING');
+  assert.equal(rover.y, y - 1); // on north, towards a
+});
+
+test('a rover can start anywhere, facing along its last aisle', () => {
+  const { rover, sent } = rig({ start: { from: 'c', to: 'J2' } });
+  rover.start(0);
+  assert.deepEqual([rover.x, rover.y, rover.heading], [12, 6, 0]);
+  assert.deepEqual(sent[0]!.options, ['proceed', 'turn_left', 'turn_right', 'stop']);
 });
 
 test('entering zone C holds the rover at the gate until an approval, logged before it moves', () => {

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The warehouse's geometry on the map (map.ts), and the rover's forward camera
 // frame at a checkpoint (signs and obstacles drawn large for the vision model).
+// Obstacles are pallets (fixed) and other rovers (they move off again).
 import { createCanvas } from '@napi-rs/canvas';
 import type { Action } from '../protocol.ts';
 import { EDGES, NODES, PALLETS, ZONES } from './map.ts';
@@ -33,10 +34,11 @@ export function exits(node: string, heading: number) {
   return out;
 }
 
-/** Is a pallet within `range` metres ahead of (x, y) along `heading`? */
-export function palletAhead(x: number, y: number, heading: number, range: number) {
+type Point = readonly [number, number];
+/** Is one of `points` (pallets by default; other rovers too) within `range` metres ahead of (x, y) along `heading`? */
+export function obstacleAhead(x: number, y: number, heading: number, range: number, points: readonly Point[] = PALLETS) {
   const ux = Math.sin((heading * Math.PI) / 180), uy = -Math.cos((heading * Math.PI) / 180);
-  return PALLETS.some(([px, py]) => {
+  return points.some(([px, py]) => {
     const along = (px - x) * ux + (py - y) * uy;
     const across = Math.abs((px - x) * uy - (py - y) * ux);
     return across < 0.5 && along > 0 && along <= range;
@@ -45,10 +47,10 @@ export function palletAhead(x: number, y: number, heading: number, range: number
 
 const blocked = (a: string, b: string) => {
   const [ax, ay] = at(a), [bx, by] = at(b);
-  return palletAhead(ax, ay, headingTo(a, b), Math.hypot(bx - ax, by - ay));
+  return obstacleAhead(ax, ay, headingTo(a, b), Math.hypot(bx - ax, by - ay));
 };
 
-type Side = 'open' | 'pallet' | 'shelving';
+type Side = 'open' | 'pallet' | 'rover' | 'shelving';
 /** What the camera sees at a checkpoint, and the options offered to 0G there. */
 export type View = { checkpoint: string; options: Action[]; left: Side; ahead: Side; right: Side };
 
@@ -59,8 +61,11 @@ export function junctionView(node: string, heading: number): View {
   return { checkpoint: node, options: [...options, 'stop'], left: side('turn_left'), ahead: side('proceed'), right: side('turn_right') };
 }
 
-export const palletView = (from: string, to: string): View =>
-  ({ checkpoint: `${from}-${to}`, options: ['turn_around', 'stop'], left: 'shelving', ahead: 'pallet', right: 'shelving' });
+/** Stopped in the aisle from `from` to `to`. Only an open aisle (another rover has moved off) offers proceed. */
+export const aisleView = (from: string, to: string, ahead: 'open' | 'pallet' | 'rover'): View => ({
+  checkpoint: `${from}-${to}`, options: ahead === 'open' ? ['proceed', 'turn_around', 'stop'] : ['turn_around', 'stop'],
+  left: 'shelving', ahead, right: 'shelving',
+});
 
 /** A 320×240 JPEG (quality 60), base64: about 5 KB, well under the mesh's 64 KiB body cap. */
 export function renderFrame(v: View): string {
@@ -78,10 +83,11 @@ export function renderFrame(v: View): string {
     }
     g.fillStyle = '#151515'; g.fillRect(x + 10, 60, w - 20, 70); // the aisle's depth
     g.fillStyle = '#fff'; g.font = 'bold 22px sans-serif'; g.fillText(label, x + w / 2 - g.measureText(label).width / 2, 225);
-    if (side === 'pallet') {
-      g.fillStyle = '#8b4513'; g.fillRect(x + 4, 95, w - 8, 95);
+    if (side === 'pallet' || side === 'rover') {
+      const word = side.toUpperCase();
+      g.fillStyle = side === 'pallet' ? '#8b4513' : '#1f5fbf'; g.fillRect(x + 4, 95, w - 8, 95);
       g.fillStyle = '#ffd700'; g.font = 'bold 20px sans-serif';
-      g.fillText('PALLET', x + w / 2 - g.measureText('PALLET').width / 2, 150);
+      g.fillText(word, x + w / 2 - g.measureText(word).width / 2, 150);
     }
   }
   g.fillStyle = '#ffd400'; g.fillRect(110, 6, 100, 40);

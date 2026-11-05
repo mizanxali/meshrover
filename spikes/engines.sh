@@ -4,12 +4,17 @@
 # Peer streams on 71xx, local API (TCP) on 72xx, tokens in .run/<name>/token.
 # Only the base has BLE on (central and peripheral), so a phone reaches a rover
 # only through the base.
+# The base's relay fanout is 6, not the default 3: the SDK (0.32.0) counts each
+# phone on the base's BLE peripheral twice (its Bluetooth UUID and its address)
+# and hands the base's own frames for a non-neighbour to the strongest links
+# only, where rover-a's loopback link (no RSSI) loses to the phones. With two
+# phones on, nothing the base sent reached rover-b.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export OFFLINE_PROTOCOL_STORE_KEY="${OFFLINE_PROTOCOL_STORE_KEY:-$(cat .run/store.key 2>/dev/null || (mkdir -p .run && openssl rand -hex 32 | tee .run/store.key))}"
 CONFIG="${CONFIG:-config/engine.json}"
 mkdir -p .run/base
-jq '.ble_enabled = true' "$CONFIG" > .run/base/engine.json
+jq '.ble_enabled = true | .mesh_relay = {fanout: 6}' "$CONFIG" > .run/base/engine.json
 start() { # name listen api [peer]
   local d=".run/$1"; mkdir -p "$d/mls" "$d/state"
   local config="$CONFIG"; [ "$1" = base ] && config=.run/base/engine.json

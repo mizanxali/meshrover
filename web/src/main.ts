@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Public data only: no secrets, no World `sub` values.
-// Live view: the sim's feed on this Mac (map, rover pose and state, the latest
-// 0G decision with its request ID and the frame the model saw).
+// Live view: the sim's feed on this Mac (map, each rover's pose and state, its
+// latest 0G decision with the request ID and the frame the model saw).
 // Replay: the episodes anchored on Galileo, each downloaded from 0G Storage by
 // the root in its anchor and stepped through on the same map.
 // Approvals: the base's feed on this Mac lists approvals waiting on an operator
@@ -13,7 +13,7 @@ import { FLEET as FLEET_NAME, SEPOLIA_RPC, readRoster, sepoliaClient } from '../
 import { APPROVER_ROLES, type Roster, authorize } from '../../src/protocol.ts';
 
 type Entry = {
-  kind: string; seq: number; robot?: string; checkpoint?: string; action?: string; reason?: string; request_id?: string;
+  kind: string; seq?: number; robot?: string; checkpoint?: string; action?: string; reason?: string; request_id?: string;
   pose?: { x: number; y: number; heading: number }; frame_jpeg_b64?: string; model?: string; tee_verified?: boolean;
   verifiability?: string; t_request_ms?: number; t_decision_ms?: number; zone?: string; approver?: string;
 };
@@ -46,24 +46,17 @@ app.innerHTML = `
   </div>
   <div class="row">
     <canvas id="map" width="${28 * S}" height="${16 * S}"></canvas>
-    <aside>
-      <div id="state" class="state"></div>
-      <div id="reason"></div>
-      <div id="cards"></div>
-      <h2>Latest 0G decision</h2>
-      <dl id="decision"><dd>none yet</dd></dl>
-      <img id="frame" alt="the frame the model saw" width="320" height="240">
-    </aside>
+    <aside id="cards"></aside>
   </div>
-  <h2>Rover log</h2>
-  <ol id="log"></ol>
+  <div id="rovers" class="row"></div>
   <h2>Fleet roster <small>${FLEET_NAME} on ENSv2 (Sepolia), read from the chain</small></h2>
   <table id="roster"><tr><td>loading…</td></tr></table>
   <h2>Anchored episodes <small>EpisodeAnchor on 0G Galileo · files on 0G Storage</small></h2>
   <table id="anchors"><tr><td>loading…</td></tr></table>`;
 const $ = (id: string) => document.getElementById(id)!;
 const ctx = ($('map') as HTMLCanvasElement).getContext('2d')!;
-function draw(s: Snapshot | null) {
+const label = (robot: string) => robot.split('.')[0]!.replace(/^rover-/, '').toUpperCase();
+function draw(list: Snapshot[]) {
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
   ctx.lineCap = 'square';
   ctx.lineWidth = 1.2 * S;
@@ -85,33 +78,49 @@ function draw(s: Snapshot | null) {
   for (const [x, y] of PALLETS) {
     ctx.fillStyle = '#8b4513'; ctx.fillRect(x * S - 12, y * S - 12, 24, 24);
   }
-  if (!s) return;
-  const h = (s.heading * Math.PI) / 180;
-  ctx.save();
-  ctx.translate(s.x * S, s.y * S);
-  ctx.rotate(h);
-  ctx.fillStyle = COLORS[s.state] ?? '#888';
-  ctx.beginPath(); ctx.moveTo(0, -14); ctx.lineTo(10, 10); ctx.lineTo(-10, 10); ctx.closePath(); ctx.fill();
-  ctx.restore();
+  for (const s of list) {
+    ctx.save();
+    ctx.translate(s.x * S, s.y * S);
+    ctx.fillStyle = '#000'; ctx.fillText(label(s.robot), 14, -10);
+    ctx.rotate((s.heading * Math.PI) / 180);
+    ctx.fillStyle = COLORS[s.state] ?? '#888';
+    ctx.beginPath(); ctx.moveTo(0, -14); ctx.lineTo(10, 10); ctx.lineTo(-10, 10); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
 }
 
 const esc = (v: unknown) => String(v).replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
-function render(s: Snapshot) {
-  draw(s);
-  $('state').textContent = s.state.replace('_', ' ');
-  $('state').style.background = COLORS[s.state] ?? '#888';
-  $('reason').textContent = `${s.reason}${s.pending ? ` · waiting on seq ${s.pending}` : ''} · ${s.robot} · ${s.episode}`;
+/** One panel per rover, made once and then updated, so its frame doesn't flicker. */
+function panel(robot: string) {
+  const id = `rover-${label(robot)}`;
+  let p = document.getElementById(id);
+  if (p) return (sel: string) => p!.querySelector<HTMLElement>(sel)!;
+  p = Object.assign(document.createElement('section'), { id, className: 'rover' });
+  p.innerHTML = `<h2>${esc(robot)}</h2><div class="state"></div><div class="reason"></div>` +
+    '<h2>Latest 0G decision</h2><dl><dd>none yet</dd></dl><img alt="the frame the model saw" width="320" height="240"><h2>Log</h2><ol></ol>';
+  $('rovers').append(p);
+  return (sel: string) => p!.querySelector<HTMLElement>(sel)!;
+}
+function render(list: Snapshot[]) {
+  draw(list);
+  for (const s of list) show(s);
+}
+function show(s: Snapshot) {
+  const $ = panel(s.robot);
+  $('.state').textContent = s.state.replace('_', ' ');
+  $('.state').style.background = COLORS[s.state] ?? '#888';
+  $('.reason').textContent = `${s.reason}${s.pending ? ` · waiting on seq ${s.pending}` : ''} · ${s.episode}`;
   const d = s.last;
   if (d) {
-    $('decision').innerHTML = [
+    $('dl').innerHTML = [
       ['checkpoint', `${d.checkpoint} (seq ${d.seq})`], ['action', d.action], ['reason', d.reason],
       ['request ID', d.request_id], ['tee_verified', d.tee_verified], ['TEE tier', d.verifiability || 'unknown'], ['model', d.model], ['latency', `${d.latency_ms} ms`],
     ].map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('');
     const src = `data:image/jpeg;base64,${d.frame}`;
-    if (($('frame') as HTMLImageElement).src !== src) ($('frame') as HTMLImageElement).src = src;
+    if (($('img') as HTMLImageElement).src !== src) ($('img') as HTMLImageElement).src = src;
   }
-  $('log').innerHTML = s.recent.map((e) =>
-    `<li class="${e.kind}"><b>${esc(e.kind)}</b> seq ${e.seq} ${esc(e.checkpoint ?? '')} ` +
+  $('ol').innerHTML = s.recent.map((e) =>
+    `<li class="${e.kind}"><b>${esc(e.kind)}</b> ${e.seq === undefined ? '' : `seq ${e.seq}`} ${esc(e.checkpoint ?? '')} ` +
     (e.kind === 'decision' ? `${esc(e.action)} · <code>${esc(e.request_id)}</code>`
       : e.kind === 'approval' ? `zone ${esc(e.zone)} · approved by ${esc(e.approver)}` : esc(e.reason ?? '')) + '</li>').join('');
 }
@@ -127,7 +136,7 @@ const approvals = new EventSource(APPROVALS);
 approvals.onmessage = (e) => { cards = JSON.parse(e.data); showCards(); };
 setInterval(() => cards.length && showCards(), 1000);
 
-draw(null);
+draw([]);
 const feed = new EventSource(FEED);
 feed.onmessage = (e) => render(JSON.parse(e.data));
 feed.onopen = () => { $('conn').textContent = 'live'; };
@@ -184,6 +193,7 @@ async function replay(a: Anchor) {
   feed.close();
   approvals.close();
   $('cards').innerHTML = '';
+  $('rovers').innerHTML = '';
   const episode = entries[0]!.episode ?? a.episodeId;
   const step = $('step') as HTMLInputElement;
   step.max = String(entries.length - 1);
@@ -212,14 +222,22 @@ async function replay(a: Anchor) {
   show(0);
 }
 
-/** The episode as the live view would have shown it at entry i: last pose, latest decision, recent entries. */
-function snapshotAt(entries: Entry[], i: number, episode: string): Snapshot {
+/** Every rover heard of by entry i, as the live view would have shown it then. */
+function snapshotAt(entries: Entry[], i: number, episode: string): Snapshot[] {
+  const seen = entries.slice(0, i + 1);
+  const robots = [...new Set(seen.map((e) => e.robot))].filter((r) => r !== undefined); // a rejected command names no robot
+  return robots.map((robot) => robotAt(seen.filter((e) => e.robot === robot), episode));
+}
+
+/** One rover at its last entry: last pose, latest decision, recent entries. */
+function robotAt(entries: Entry[], episode: string): Snapshot {
+  const i = entries.length - 1;
   let pose = { x: 0, y: 0, heading: 0 };
   let last: Snapshot['last'] = null;
-  for (const e of entries.slice(0, i + 1)) {
+  for (const e of entries) {
     if (e.pose) pose = e.pose;
     if (e.kind === 'decision') last = {
-      seq: e.seq, checkpoint: e.checkpoint ?? '', action: e.action ?? '', reason: e.reason ?? '', model: e.model ?? '',
+      seq: e.seq ?? 0, checkpoint: e.checkpoint ?? '', action: e.action ?? '', reason: e.reason ?? '', model: e.model ?? '',
       request_id: e.request_id ?? '', tee_verified: e.tee_verified === true, verifiability: e.verifiability ?? '',
       latency_ms: (e.t_decision_ms ?? 0) - (e.t_request_ms ?? 0), frame: e.frame_jpeg_b64 ?? '',
     };
@@ -229,7 +247,7 @@ function snapshotAt(entries: Entry[], i: number, episode: string): Snapshot {
   const reason = e.kind === 'approval' ? `zone ${e.zone}: approved by ${e.approver}` : moving ? `0G: ${e.action}` : (e.reason ?? e.kind);
   return {
     robot: e.robot ?? '', episode, state: moving ? 'DRIVING' : 'SAFE_STOPPED', reason,
-    ...pose, battery: 0, seq: e.seq, pending: null, last, recent: entries.slice(Math.max(0, i - 7), i + 1).reverse(),
+    ...pose, battery: 0, seq: e.seq ?? 0, pending: null, last, recent: entries.slice(Math.max(0, i - 7), i + 1).reverse(),
   };
 }
 

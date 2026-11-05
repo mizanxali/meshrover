@@ -9,7 +9,7 @@ import {
   type Action, type ApproveRequest, type DecideRequest, type DecideResponse, type Pending, type PendingApproval, type Roster,
   ROVER_APPROVAL_DEADLINE_MS, ROVER_DEADLINE_MS, acceptApproval, acceptDecision,
 } from '../protocol.ts';
-import { NODES, STOP_DISTANCE, type View, ZONES, exits, headingTo, junctionView, nextAlong, palletAhead, palletView } from './world.ts';
+import { NODES, STOP_DISTANCE, type View, ZONES, aisleView, exits, headingTo, junctionView, nextAlong, obstacleAhead } from './world.ts';
 
 export type State = 'DRIVING' | 'AWAITING_DECISION' | 'AWAITING_APPROVAL' | 'SAFE_STOPPED';
 export type LogEntry = { kind: 'decision' | 'safe_stop' | 'approval' | 'denied'; [k: string]: unknown };
@@ -27,6 +27,8 @@ type Options = {
   sendApproval: (req: ApproveRequest) => Promise<unknown>;
   log: (e: LogEntry) => void; // synchronous: an entry is on disk before the motion it leads to
   render: (v: View) => string;
+  start?: { from: string; to: string }; // held at `to`, having come from `from` (default: J1, facing north)
+  others?: () => readonly (readonly [number, number])[]; // where the other rovers in the warehouse are: obstacles
 };
 
 const zoneOf = (node: string) => Object.keys(ZONES).find((z) => ZONES[z]!.includes(node));
@@ -43,19 +45,22 @@ export class Rover {
   approving: PendingApproval | null = null;
   last: (DecideResponse & { checkpoint: string; latency_ms: number; frame: string }) | null = null;
   recent: LogEntry[] = [];
-  private from = 'g';
-  private to = 'J1';
+  private from: string;
+  private to: string;
   private view: View | null = null; // the checkpoint the rover is held at
+  private blocked: 'pallet' | 'rover' | null = null; // stopped in an aisle, and by what
   private gate: { zone: string; from: string; to: string } | null = null; // the zone entry the rover is held at
   private frame = '';
   private tRequest = 0;
   private retryAt = 0;
 
   constructor(private o: Options) {
+    ({ from: this.from, to: this.to } = o.start ?? { from: 'g', to: 'J1' });
     [this.x, this.y] = NODES[this.to]!;
+    this.heading = headingTo(this.from, this.to);
   }
 
-  /** Begin held at J1, facing north, asking for the first decision. */
+  /** Begin held at the start node, asking for the first decision. */
   start(now: number) {
     this.arrive(now);
   }
@@ -117,6 +122,8 @@ export class Rover {
   }
 
   private ask(now: number) {
+    // Another rover may have moved off since the stop: look again, so 0G sees the aisle as it is now.
+    if (this.blocked === 'rover') this.view = aisleView(this.from, this.to, this.roverAhead(STOP_DISTANCE + 0.5) ? 'rover' : 'open');
     const view = this.view!;
     const seq = ++this.seq;
     this.frame = this.o.render(view);
@@ -169,10 +176,12 @@ export class Rover {
 
   private drive(now: number, dt: number) {
     const step = SPEED * dt;
-    if (palletAhead(this.x, this.y, this.heading, STOP_DISTANCE + step)) { // never step past the stop line
-      this.view = palletView(this.from, this.to);
+    // Never step past the stop line, for a pallet or another rover.
+    this.blocked = obstacleAhead(this.x, this.y, this.heading, STOP_DISTANCE + step) ? 'pallet' : this.roverAhead(STOP_DISTANCE + step) ? 'rover' : null;
+    if (this.blocked) {
+      this.view = aisleView(this.from, this.to, this.blocked);
       this.state = 'AWAITING_DECISION';
-      this.reason = 'pallet ahead';
+      this.reason = `${this.blocked} ahead`;
       return this.ask(now);
     }
     const [tx, ty] = NODES[this.to]!;
@@ -197,8 +206,13 @@ export class Rover {
     this.ask(now);
   }
 
+  private roverAhead(range: number) {
+    return obstacleAhead(this.x, this.y, this.heading, range, this.o.others?.() ?? []);
+  }
+
   private go(action: Action, now: number) {
     if (action === 'turn_around') return this.follow(this.to, this.from, now);
+    if (this.blocked) return this.enter(this.from, this.to); // proceed: on along the aisle it stopped in, now clear
     this.follow(this.to, exits(this.to, this.heading)[action]!, now); // acceptDecision only passes offered actions
   }
 
@@ -217,6 +231,7 @@ export class Rover {
     this.to = to;
     this.heading = headingTo(from, to);
     this.view = null;
+    this.blocked = null;
     this.state = 'DRIVING';
   }
 
