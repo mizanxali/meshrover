@@ -4,6 +4,9 @@
 // It also provides `fleet.approve`: a World ID check by an enrolled operator
 // before a rover enters a restricted zone. Pending approvals are served to the
 // dashboard on http://127.0.0.1:7301/events (the link and code only, no secret).
+// Operators' phones subscribe over the mesh (BLE to this engine) to
+// `fleet.status` (each rover's state, as the base last heard it) and
+// `fleet.approvals` (the same cards), so they keep working with no internet.
 // Ctrl-C ends the episode: the base refuses further decisions, then records
 // the file on 0G Storage and anchors it on Galileo (retrying while offline).
 // Run: npm run base   (engines up; ZG_API_KEY, KEYSTORE_PASSWORD in .env; EPISODE optional)
@@ -38,6 +41,17 @@ console.log(`0G model ${model} (${verifiability})`);
 const engine = await connectEngine('base', 7201);
 await engine.call('services.register_service', { service_id: 'fleet.decide', version: '1', capabilities: {} });
 await engine.call('services.register_service', { service_id: 'fleet.approve', version: '1', capabilities: {} });
+for (const service_id of ['fleet.status', 'fleet.approvals']) {
+  await engine.call('services.register_service', { service_id, version: '1', capabilities: {} });
+  // ponytail: any sealed peer may watch; restrict to the roster's operator keys (Rules, allow_peers) once the roster has them.
+  await engine.call('services.set_service_subscription_policy', { service_id, policy: { kind: 'AcceptAll' } });
+}
+const publish = (service_id: string, topic: string, key: string, body: object) =>
+  engine.call('services.publish_service_update', { service_id, topic, key, body: JSON.stringify(body) })
+    .catch((err: Error) => console.error(`publish ${service_id}: ${err.message}`));
+/** What the base last heard of a robot, for the operators' phones. It's the base's view: between checkpoints it hears nothing. */
+const tell = (robot: string, state: string, reason: string, extra: object = {}) =>
+  void publish('fleet.status', 'rovers', robot, { robot, episode, state, reason, ...extra, t_ms: Date.now() });
 // ponytail: the roster from a file; it will be read from the fleet's ENSv2 names and cached.
 const roster: Roster = JSON.parse(readFileSync('config/roster.json', 'utf8'));
 // ponytail: provisioning by file on this Mac; rovers will take the base's address from the ENS roster instead.
@@ -78,6 +92,7 @@ async function onDecide(e: EngineEvent) {
   if (!req) return refuse('malformed request');
   if (req.episode !== episode) return refuse(`wrong episode ${req.episode}, base is on ${episode}`);
 
+  tell(req.robot, 'AWAITING_DECISION', `checkpoint ${req.checkpoint}`, { checkpoint: req.checkpoint, seq });
   const d = await decide(req, KEY, verifiability);
   if (ended) return respond('error', { v: 1, seq, error: 'episode ended' });
   const t_decision_ms = Date.now();
@@ -88,10 +103,12 @@ async function onDecide(e: EngineEvent) {
   };
   if ('error' in d) {
     log({ kind: 'safe_stop', ...common, reason: d.error });
+    tell(req.robot, 'SAFE_STOPPED', d.error, { checkpoint: req.checkpoint, seq });
     console.log(`${req.robot} seq ${seq} at ${req.checkpoint}: ${d.error} (${t_decision_ms - t_request_ms} ms)`);
     return respond('error', { v: 1, seq, error: d.error });
   }
   log({ kind: 'decision', ...common, action: d.action, reason: d.reason, model: d.model, zg_res_key: d.zg_res_key, provider: d.provider, tee_verified: true, verifiability });
+  tell(req.robot, d.action === 'stop' ? 'SAFE_STOPPED' : 'DRIVING', `0G: ${d.action}`, { checkpoint: req.checkpoint, seq, request_id: d.request_id });
   console.log(`${req.robot} seq ${seq} at ${req.checkpoint}: ${d.action} (${t_decision_ms - t_request_ms} ms, ${d.request_id}) ${d.reason}`);
   return respond('ok', { v: 1, seq, action: d.action, reason: d.reason, model: d.model, request_id: d.request_id, tee_verified: true, verifiability });
 }
@@ -100,9 +117,12 @@ async function onDecide(e: EngineEvent) {
 const cards = new Map<string, Card & { robot: string; zone: string }>();
 const watchers = new Set<ServerResponse>();
 const showCards = () => {
-  const msg = `data: ${JSON.stringify([...cards.values()])}\n\n`;
+  const list = [...cards.values()];
+  const msg = `data: ${JSON.stringify(list)}\n\n`;
   for (const w of watchers) w.write(msg);
+  void publish('fleet.approvals', 'pending', 'cards', list);
 };
+showCards(); // a restarted provider holds no topics: publish the (empty) state at startup
 createServer((req, res) => {
   if (req.url !== '/events') return void res.writeHead(404).end();
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', 'access-control-allow-origin': '*' });
@@ -123,6 +143,7 @@ async function onApprove(e: EngineEvent) {
   const deny = (denied: string, extra: object = {}) => {
     if (ended) return respond('error', { v: 1, nonce, denied: 'episode ended' });
     log({ kind: 'denied', robot: req?.robot, sender: e.sender, seq: req?.seq, zone: req?.zone, nonce, reason: denied, ...extra, t_request_ms, t_ms: Date.now() });
+    if (req && !authorize(roster, req.robot, ['robot'], Date.now())) tell(req.robot, 'SAFE_STOPPED', `zone ${req.zone}: ${denied}`, { zone: req.zone });
     console.log(`${req?.robot ?? e.sender} zone ${req?.zone}: denied, ${denied}`);
     return respond('error', { v: 1, nonce, denied });
   };
@@ -134,6 +155,7 @@ async function onApprove(e: EngineEvent) {
   if (robotWhy) return deny(robotWhy);
 
   console.log(`${req.robot} at zone ${req.zone} gate: waiting for World ID`);
+  tell(req.robot, 'AWAITING_APPROVAL', `zone ${req.zone} gate: waiting for World ID`, { zone: req.zone });
   const human = await verifyHuman((c) => {
     cards.set(req.robot, { ...c, robot: req.robot, zone: req.zone });
     showCards();
@@ -153,5 +175,6 @@ async function onApprove(e: EngineEvent) {
   const approval: Approval = { v: 1, robot: req.robot, action: 'enter_zone', zone: req.zone, approver, nonce, expires_at: now + APPROVAL_TTL_MS };
   log({ kind: 'approval', robot: req.robot, seq: req.seq, zone: req.zone, approver, nonce, expires_at: approval.expires_at, ...proof, t_request_ms, t_ms: now });
   console.log(`${req.robot} zone ${req.zone}: approved by ${approver}`);
+  tell(req.robot, 'DRIVING', `zone ${req.zone}: approved by ${approver}`, { zone: req.zone });
   return respond('ok', approval);
 }
