@@ -9,12 +9,12 @@
 import { renderSVG } from 'uqr';
 import { EDGES, NODES, PALLETS, ZONES } from '../../src/sim/map.ts';
 import { FLEET as FLEET_NAME, SEPOLIA_RPC, readRoster, sepoliaClient } from '../../src/base/roster.ts';
-import { APPROVER_ROLES, type Roster, authorize } from '../../src/protocol.ts';
+import { APPROVAL_WINDOW_MS, APPROVER_ROLES, BASE_TIMEOUT_MS, type Roster, authorize } from '../../src/protocol.ts';
 
 type Entry = {
   kind: string; seq?: number; robot?: string; checkpoint?: string; action?: string; reason?: string; request_id?: string;
   pose?: { x: number; y: number; heading: number }; frame_jpeg_b64?: string; model?: string; tee_verified?: boolean;
-  verifiability?: string; t_request_ms?: number; t_decision_ms?: number; zone?: string; approver?: string;
+  verifiability?: string; t_request_ms?: number; t_decision_ms?: number; t_ms?: number; zone?: string; approver?: string;
 };
 type Card = { robot: string; zone: string; link: string; user_code: string; deadline: number };
 type Snapshot = {
@@ -31,115 +31,286 @@ const DEPLOY_BLOCK = 64020724;
 const FLEET = '0x50074104728d49e1f57ad4abd365fde9246fda5f25d1f2384b17580c47a52b9a'; // namehash('meshrover-demo.eth')
 const INDEXER = 'https://indexer-storage-testnet-turbo.0g.ai';
 const EXPLORER = 'https://chainscan-galileo.0g.ai';
-const S = 32; // px per metre
-const COLORS: Record<string, string> = { DRIVING: '#2e9d4f', AWAITING_DECISION: '#d89a00', SAFE_STOPPED: '#d0342c', AWAITING_APPROVAL: '#6a4cc7' };
+const S = 32; // map units per metre
+const W = 28 * S, H = 16 * S;
+const COLORS: Record<string, string> = { DRIVING: '#22c55e', AWAITING_DECISION: '#f5a524', SAFE_STOPPED: '#f04444', AWAITING_APPROVAL: '#a78bfa' };
+const STATE_NAMES: Record<string, string> = { DRIVING: 'Driving', AWAITING_DECISION: 'Awaiting 0G', SAFE_STOPPED: 'Safe-stopped', AWAITING_APPROVAL: 'Awaiting human' };
+const KIND_COLORS: Record<string, string> = { decision: '#22c55e', safe_stop: '#f04444', approval: '#a78bfa', denied: '#f04444', rejected_command: '#f04444' };
+const color = (state: string) => COLORS[state] ?? '#a0a0a0';
 const inZone = (n: string) => Object.values(ZONES).some((z) => z.includes(n));
+const esc = (v: unknown) => String(v).replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+const short = (h: string) => `${h.slice(0, 10)}…${h.slice(-6)}`;
+const label = (robot: string) => robot.split('.')[0]!.replace(/^rover-/, '').toUpperCase();
+const clock = (t: number) => new Date(t).toLocaleTimeString([], { hour12: false });
+const words = (action: string) => { const s = action.replace(/_/g, ' '); return s.charAt(0).toUpperCase() + s.slice(1); };
+const statePill = (state: string) => `<span class="state" style="color:${color(state)}"><i class="dot"></i>${esc(STATE_NAMES[state] ?? state)}</span>`;
+/** "in 1 h 20 min" or "3 min ago". */
+function rel(t: number, now = Date.now()) {
+  const m = Math.round(Math.abs(t - now) / 60_000);
+  const s = m < 1 ? 'under a minute' : m < 60 ? `${m} min` : m < 48 * 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${Math.round(m / 1440)} days`;
+  return t > now ? `in ${s}` : `${s} ago`;
+}
+const bar = (title: string, sub = '', right = '') =>
+  `<div class="bar"><span class="title">${title}</span><span class="sub">${sub}</span><span class="right">${right}</span></div>`;
 
 const app = document.querySelector<HTMLElement>('#app')!;
 app.innerHTML = `
-  <h1>Mesh Rover <small id="conn">connecting…</small></h1>
-  <div id="player" hidden>
-    <button id="prev">◀</button> <button id="play">play</button> <button id="next">▶</button>
-    <input id="step" type="range" min="0" value="0"> <span id="at"></span>
-    <button id="live">back to live</button>
-  </div>
-  <div class="row">
-    <canvas id="map" width="${28 * S}" height="${16 * S}"></canvas>
-    <aside id="cards"></aside>
-  </div>
-  <div id="rovers" class="row"></div>
-  <h2>Fleet roster <small>${FLEET_NAME} on ENSv2 (Sepolia), read from the chain</small></h2>
-  <table id="roster"><tr><td>loading…</td></tr></table>
-  <h2>Anchored episodes <small>EpisodeAnchor on 0G Galileo · files on 0G Storage</small></h2>
-  <table id="anchors"><tr><td>loading…</td></tr></table>`;
+  <header>
+    <div class="t">Mesh Rover<span>${esc(FLEET_NAME)}</span></div>
+    <div class="status">
+      <span id="p-sim"><i class="dot"></i>Sim <b>connecting</b></span>
+      <span id="p-base"><i class="dot"></i>Base <b>connecting</b></span>
+      <span id="p-ens"><i class="dot"></i>ENS roster <b>reading</b></span>
+      <span id="p-0g"><i class="dot"></i>0G anchors <b>reading</b></span>
+    </div>
+    <span id="clock"></span>
+  </header>
+  <div class="split row">
+    <div class="split col">
+      <section class="pane" style="flex:1.25 1 0">
+        ${bar('Warehouse floor', '<span id="mode">live from the sim</span>', `<span id="player" hidden>
+          <button id="prev" aria-label="previous entry">◀</button> <button id="play">Play</button> <button id="next" aria-label="next entry">▶</button>
+          <input id="step" type="range" min="0" value="0" aria-label="entry"> <span id="at" class="mono"></span> <button id="live">Back to live</button>
+        </span><span id="ep" class="mono na"></span>`)}
+        <div class="body" id="mapbody"><canvas id="map"></canvas></div>
+      </section>
+      <div class="gutter"></div>
+      <section class="pane">
+        ${bar('Rovers', 'pose, latest 0G decision, the frame the model saw, log')}
+        <div class="body" id="rovers"><div class="empty">No rovers on the feed</div></div>
+      </section>
+    </div>
+    <div class="gutter"></div>
+    <div class="split col" style="flex:0 0 460px">
+      <section class="pane fit" style="flex:0 0 auto">${bar('Fleet', '', '<span id="s-lat" class="na"></span>')}<div class="body" id="fleet"></div></section>
+      <div class="gutter"></div>
+      <section class="pane">${bar('Approvals', 'World ID, before zone C', '<span id="ncards" style="color:#a78bfa"></span>')}<div class="body" id="cards"></div></section>
+      <div class="gutter"></div>
+      <section class="pane">${bar('Fleet roster', `${esc(FLEET_NAME)} on ENSv2, Sepolia`)}
+        <div class="body"><table id="roster"><tr><td class="msg">Reading the roster from Sepolia…</td></tr></table></div></section>
+      <div class="gutter"></div>
+      <section class="pane" style="flex:.7 1 0">${bar('Anchored episodes', 'EpisodeAnchor on 0G Galileo, files on 0G Storage')}
+        <div class="body"><table id="anchors"><tr><td class="msg">Reading anchors from Galileo…</td></tr></table></div></section>
+    </div>
+  </div>`;
 const $ = (id: string) => document.getElementById(id)!;
-const ctx = ($('map') as HTMLCanvasElement).getContext('2d')!;
-const label = (robot: string) => robot.split('.')[0]!.replace(/^rover-/, '').toUpperCase();
+/** One header status: `ok`, `warn`, `bad` or none. */
+const pill = (id: string, cls: string, text: string, title = '') => {
+  const p = $(id);
+  p.className = cls;
+  p.title = title;
+  p.querySelector('b')!.textContent = text;
+};
+const tick = () => { $('clock').textContent = clock(Date.now()); };
+tick();
+setInterval(tick, 1000);
+
+// ---- Panes: click a title to collapse, drag a gutter to resize ----
+
+app.addEventListener('click', (e) => {
+  const t = (e.target as HTMLElement).closest('.title');
+  if (t) t.closest('.pane')!.classList.toggle('collapsed');
+});
+for (const g of document.querySelectorAll<HTMLElement>('.gutter')) {
+  g.onpointerdown = (down) => {
+    const prev = g.previousElementSibling as HTMLElement, next = g.nextElementSibling as HTMLElement;
+    if (prev.classList.contains('collapsed') || next.classList.contains('collapsed')) return;
+    const across = g.parentElement!.classList.contains('row');
+    const start = across ? prev.offsetWidth : prev.offsetHeight;
+    const total = start + (across ? next.offsetWidth : next.offsetHeight);
+    const from = across ? down.clientX : down.clientY;
+    g.setPointerCapture(down.pointerId);
+    g.classList.add('drag');
+    g.onpointermove = (m) => {
+      const size = Math.max(60, Math.min(total - 60, start + (across ? m.clientX : m.clientY) - from));
+      prev.style.flex = `0 0 ${size}px`;
+      next.style.flex = '1 1 0';
+    };
+    g.onpointerup = () => { g.onpointermove = null; g.classList.remove('drag'); };
+  };
+}
+
+// ---- The map ----
+
+const canvas = $('map') as HTMLCanvasElement;
+const ctx = canvas.getContext('2d')!;
+const trails = new Map<string, [number, number][]>();
+let shown: Snapshot[] = [];
+// Fit the map to its pane at the screen's pixel density, then redraw.
+new ResizeObserver(([e]) => {
+  const { width, height } = e!.contentRect;
+  const k = Math.max(0.1, Math.min(width / W, height / H));
+  const dpr = window.devicePixelRatio || 1;
+  canvas.style.width = `${W * k}px`;
+  canvas.style.height = `${H * k}px`;
+  canvas.width = Math.round(W * k * dpr);
+  canvas.height = Math.round(H * k * dpr);
+  ctx.setTransform(k * dpr, 0, 0, k * dpr, 0, 0);
+  draw(shown);
+}).observe($('mapbody'));
+const box = (x: number, y: number, w: number, h: number, r: number) => { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); };
+const hex2 = (a: number) => Math.round(a * 255).toString(16).padStart(2, '0');
 function draw(list: Snapshot[]) {
-  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-  ctx.lineCap = 'square';
-  ctx.lineWidth = 1.2 * S;
-  for (const [a, b] of EDGES) {
-    const [ax, ay] = NODES[a]!, [bx, by] = NODES[b]!;
-    ctx.strokeStyle = inZone(a) || inZone(b) ? '#ddd3f5' : '#d6d6d6';
-    ctx.beginPath(); ctx.moveTo(ax * S, ay * S); ctx.lineTo(bx * S, by * S); ctx.stroke();
+  shown = list;
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  ctx.lineWidth = 1;
+  for (let m = 0; m <= 28; m++) {
+    ctx.strokeStyle = m % 4 ? '#ffffff08' : '#ffffff12';
+    ctx.beginPath(); ctx.moveTo(m * S, 0); ctx.lineTo(m * S, H); ctx.stroke();
+    if (m <= 16) { ctx.beginPath(); ctx.moveTo(0, m * S); ctx.lineTo(W, m * S); ctx.stroke(); }
   }
-  ctx.font = 'bold 14px system-ui';
+  ctx.font = '10px ui-monospace, Menlo, monospace'; ctx.fillStyle = '#666';
+  for (let m = 4; m < 28; m += 4) ctx.fillText(`${m} m`, m * S + 3, 11);
+  // Aisles: an edge, a fill, a dashed centre line. Zone aisles get a violet edge.
+  const aisle = (w: number, style: (zone: boolean) => string, dash: number[] = []) => {
+    ctx.lineWidth = w; ctx.setLineDash(dash); ctx.lineCap = dash.length ? 'butt' : 'square';
+    for (const [a, b] of EDGES) {
+      const [ax, ay] = NODES[a]!, [bx, by] = NODES[b]!;
+      ctx.strokeStyle = style(inZone(a) || inZone(b));
+      ctx.beginPath(); ctx.moveTo(ax * S, ay * S); ctx.lineTo(bx * S, by * S); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+  };
+  aisle(1.2 * S + 2, (z) => (z ? '#a78bfa99' : '#333'));
+  aisle(1.2 * S, () => '#111');
+  aisle(1, (z) => (z ? '#a78bfa66' : '#ffffff22'), [6, 8]);
   for (const [z, nodes] of Object.entries(ZONES)) {
     const x = nodes.reduce((t, n) => t + NODES[n]![0], 0) / nodes.length, y = Math.max(...nodes.map((n) => NODES[n]![1]));
-    ctx.fillStyle = '#6a4cc7'; ctx.fillText(`restricted zone ${z}`, x * S - 60, y * S + 34);
+    const text = `Restricted zone ${z}: World ID required`;
+    ctx.font = '500 12px system-ui'; ctx.fillStyle = '#a78bfa';
+    ctx.fillText(text, x * S - ctx.measureText(text).width / 2, y * S + 40);
   }
   for (const [id, [x, y]] of Object.entries(NODES)) {
-    if (!id.startsWith('J')) continue;
-    ctx.fillStyle = '#ffd400'; ctx.fillRect(x * S - 14, y * S - 34, 28, 18);
-    ctx.fillStyle = '#000'; ctx.fillText(id, x * S - 9, y * S - 20);
+    if (!id.startsWith('J')) {
+      ctx.fillStyle = '#666'; ctx.font = '11px ui-monospace, Menlo, monospace'; ctx.fillText(id, x * S + 24, y * S - 22);
+      continue;
+    }
+    box(x * S - 14, y * S - 38, 28, 18, 2); ctx.fillStyle = '#000'; ctx.fill();
+    ctx.strokeStyle = '#f5a524'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = '#f5a524'; ctx.font = '600 11px ui-monospace, Menlo, monospace'; ctx.fillText(id, x * S - 8, y * S - 25);
   }
   for (const [x, y] of PALLETS) {
-    ctx.fillStyle = '#8b4513'; ctx.fillRect(x * S - 12, y * S - 12, 24, 24);
+    box(x * S - 11, y * S - 11, 22, 22, 2); ctx.fillStyle = '#000'; ctx.fill();
+    ctx.strokeStyle = '#f5a524'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x * S - 6, y * S - 6); ctx.lineTo(x * S + 6, y * S + 6); ctx.moveTo(x * S + 6, y * S - 6); ctx.lineTo(x * S - 6, y * S + 6); ctx.stroke();
   }
   for (const s of list) {
+    const c = color(s.state);
+    const trail = trails.get(s.robot) ?? [];
+    const end = trail[trail.length - 1];
+    if (!end || Math.hypot(end[0] - s.x, end[1] - s.y) > 0.1) trail.push([s.x, s.y]);
+    if (trail.length > 80) trail.shift();
+    trails.set(s.robot, trail);
+    ctx.lineWidth = 2; ctx.lineCap = 'round';
+    for (let i = 1; i < trail.length; i++) {
+      ctx.strokeStyle = `${c}${hex2((i / trail.length) * 0.5)}`;
+      ctx.beginPath(); ctx.moveTo(trail[i - 1]![0] * S, trail[i - 1]![1] * S); ctx.lineTo(trail[i]![0] * S, trail[i]![1] * S); ctx.stroke();
+    }
     ctx.save();
     ctx.translate(s.x * S, s.y * S);
-    ctx.fillStyle = '#000'; ctx.fillText(label(s.robot), 14, -10);
+    ctx.fillStyle = '#fff'; ctx.font = '600 12px system-ui'; ctx.fillText(label(s.robot), 14, -12);
     ctx.rotate((s.heading * Math.PI) / 180);
-    ctx.fillStyle = COLORS[s.state] ?? '#888';
-    ctx.beginPath(); ctx.moveTo(0, -14); ctx.lineTo(10, 10); ctx.lineTo(-10, 10); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = c;
+    ctx.beginPath(); ctx.moveTo(0, -13); ctx.lineTo(9, 9); ctx.lineTo(0, 5); ctx.lineTo(-9, 9); ctx.closePath(); ctx.fill();
     ctx.restore();
   }
 }
 
-const esc = (v: unknown) => String(v).replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
-/** One panel per rover, made once and then updated, so its frame doesn't flicker. */
+// ---- Rover panes, the fleet list and the counts ----
+
+/** Sets innerHTML only when it changes, so a 10 Hz feed doesn't reset scroll or reload images. */
+const set = (el: HTMLElement, html: string) => { if (el.dataset.h !== html) { el.dataset.h = html; el.innerHTML = html; } };
+/** One column per rover, made once and then updated, so its frame doesn't flicker. */
 function panel(robot: string) {
   const id = `rover-${label(robot)}`;
   let p = document.getElementById(id);
-  if (p) return (sel: string) => p!.querySelector<HTMLElement>(sel)!;
-  p = Object.assign(document.createElement('section'), { id, className: 'rover' });
-  p.innerHTML = `<h2>${esc(robot)}</h2><div class="state"></div><div class="reason"></div>` +
-    '<h2>Latest 0G decision</h2><dl><dd>none yet</dd></dl><img alt="the frame the model saw" height="240"><h2>Log</h2><ol></ol>';
-  $('rovers').append(p);
+  if (!p) {
+    $('rovers').querySelector('.empty')?.remove();
+    p = Object.assign(document.createElement('div'), { id, className: 'rover' });
+    p.innerHTML = `<div class="head"><span class="badge">${esc(label(robot))}</span><span class="n">${esc(robot)}</span><span class="ep"></span><span class="pillslot state"></span></div>
+      <div class="reason"></div>
+      <div class="tele">Position<span class="pos"></span> Heading<span class="hdg"></span> Battery<span class="bat"></span> Seq<span class="seq"></span></div>
+      <div class="rbody">
+        <div><div class="lbl">Frame the model saw</div><div class="frame"><span class="none">No frame sent yet</span><img alt="the frame the model saw" hidden></div>
+          <div class="lbl">Latest 0G decision</div><div class="decision"><span class="na">None yet: the rover holds until 0G answers.</span></div></div>
+        <div><div class="lbl">Log</div><ol class="log"></ol></div>
+      </div>`;
+    $('rovers').append(p);
+  }
   return (sel: string) => p!.querySelector<HTMLElement>(sel)!;
 }
 function render(list: Snapshot[]) {
   draw(list);
   for (const s of list) show(s);
+  const n = (state: string) => list.filter((s) => s.state === state).length;
+  const lat = list.map((s) => s.last?.latency_ms).filter((v): v is number => v !== undefined);
+  set($('s-lat'), lat.length ? `0G ${(lat.reduce((a, b) => a + b, 0) / lat.length / 1000).toFixed(2)} s of ${BASE_TIMEOUT_MS / 1000} s` : '');
+  if (list[0]) set($('ep'), esc(list[0].episode));
+  set($('fleet'), list.length
+    ? `<div class="counts"><span><b>${list.length}</b>rovers</span>${Object.keys(COLORS).map((k) => `<span style="color:${COLORS[k]}"><b>${n(k)}</b>${STATE_NAMES[k]}</span>`).join('')}</div>` +
+      list.map((s) => `<div class="fl"><span class="badge">${esc(label(s.robot))}</span><span class="name">${esc(s.robot.split('.')[0])}</span>` +
+        `<span class="why">${esc(s.reason)}</span>${statePill(s.state)}</div>`).join('')
+    : '<div class="empty">No rovers on the feed</div>');
 }
 function show(s: Snapshot) {
   const $ = panel(s.robot);
-  $('.state').textContent = s.state.replace('_', ' ');
-  $('.state').style.background = COLORS[s.state] ?? '#888';
-  $('.reason').textContent = `${s.reason}${s.pending ? ` · waiting on seq ${s.pending}` : ''} · ${s.episode}`;
+  set($('.pillslot'), statePill(s.state));
+  $('.ep').textContent = s.episode;
+  $('.reason').textContent = `${s.reason}${s.pending ? ` · waiting on 0G for seq ${s.pending}` : ''}`;
+  $('.pos').textContent = `${s.x.toFixed(1)}, ${s.y.toFixed(1)} m`;
+  $('.hdg').textContent = `${Math.round(((s.heading % 360) + 360) % 360)}°`;
+  $('.bat').textContent = Number.isFinite(s.battery) ? `${Math.round(s.battery * 100)}%` : '—';
+  $('.seq').textContent = String(s.seq);
   const d = s.last;
   if (d) {
-    $('dl').innerHTML = [
-      ['checkpoint', `${d.checkpoint} (seq ${d.seq})`], ['action', d.action], ['reason', d.reason],
-      ['request ID', d.request_id], ['tee_verified', d.tee_verified], ['TEE tier', d.verifiability || 'unknown'], ['model', d.model], ['latency', `${d.latency_ms} ms`],
-    ].map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('');
+    const latColor = d.latency_ms < 4000 ? '#22c55e' : d.latency_ms < BASE_TIMEOUT_MS ? '#f5a524' : '#f04444';
+    set($('.decision'), `<div class="act" style="color:${d.action === 'stop' ? '#f04444' : '#22c55e'}">${esc(words(d.action))}</div>` +
+      `<div class="why">${esc(d.reason)}</div><dl>` +
+      `<dt>at</dt><dd>${esc(d.checkpoint)}, seq ${d.seq}</dd>` +
+      `<dt>TEE</dt><dd class="clip" title="${esc(d.verifiability)}">${d.tee_verified ? '<span class="good">verified</span>' : '<span class="warn-t">not verified</span>'} · ${esc(d.verifiability || 'tier unknown')}</dd>` +
+      `<dt>latency</dt><dd>${d.latency_ms} ms<span class="lat"><i style="width:${Math.min(1, d.latency_ms / BASE_TIMEOUT_MS) * 100}%;background:${latColor}"></i></span></dd>` +
+      `<dt>model</dt><dd>${esc(d.model)}</dd><dt>request</dt><dd>${esc(d.request_id)}</dd></dl>`);
+    const img = $('img') as HTMLImageElement;
     const src = `data:image/jpeg;base64,${d.frame}`;
-    if (($('img') as HTMLImageElement).src !== src) ($('img') as HTMLImageElement).src = src;
+    if (img.src !== src) img.src = src;
+    img.hidden = false;
+    $('.none').hidden = true;
   }
-  $('ol').innerHTML = s.recent.map((e) =>
-    `<li class="${e.kind}"><b>${esc(e.kind)}</b> ${e.seq === undefined ? '' : `seq ${e.seq}`} ${esc(e.checkpoint ?? '')} ` +
-    (e.kind === 'decision' ? `${esc(e.action)} · <code>${esc(e.request_id)}</code>`
-      : e.kind === 'approval' ? `zone ${esc(e.zone)} · approved by ${esc(e.approver)}` : esc(e.reason ?? '')) + '</li>').join('');
+  set($('ol'), s.recent.length ? s.recent.map((e) => {
+    const t = e.t_ms ?? e.t_decision_ms;
+    const what = e.kind === 'decision' ? `<b>${esc(words(e.action ?? ''))}</b>at ${esc(e.checkpoint ?? '')}, seq ${e.seq} · <code>${esc(e.request_id)}</code>`
+      : e.kind === 'approval' ? `<b>Approved</b>zone ${esc(e.zone)} by ${esc(e.approver)}`
+      : `<b>${esc(words(e.kind))}</b>${esc(e.reason ?? '')}`;
+    const c = e.kind === 'decision' && e.action === 'stop' ? '#f5a524' : KIND_COLORS[e.kind] ?? '#a0a0a0';
+    return `<li><span class="time">${t ? clock(t) : ''}</span><i class="dot" style="background:${c}"></i><span class="what" title="${esc(what.replace(/<[^>]+>/g, ' '))}">${what}</span></li>`;
+  }).join('') : '<li><span></span><span></span><span class="what">Nothing logged yet</span></li>');
 }
 
 // The approvals waiting on an operator. The link is the operator's to open; it carries no secret.
 let cards: Card[] = [];
 const showCards = () => {
-  $('cards').innerHTML = cards.map((c) => `<div class="card"><h2>${esc(c.robot)} wants to enter zone ${esc(c.zone)}</h2>` +
-    `<p>Approve with World ID, ${Math.max(0, Math.round((c.deadline - Date.now()) / 1000))} s left. Code <b>${esc(c.user_code)}</b></p>` +
-    `${renderSVG(c.link, { border: 2 })}<p><a href="${esc(c.link)}" target="_blank" rel="noreferrer">${esc(c.link)}</a></p></div>`).join('');
+  $('ncards').textContent = cards.length ? `${cards.length} waiting` : '';
+  set($('cards'), cards.length ? cards.map((c) => {
+    const left = Math.max(0, c.deadline - Date.now());
+    return `<div class="card"><div class="qr">${renderSVG(c.link, { border: 1 })}</div>` +
+      `<div class="t">${esc(c.robot.split('.')[0])} wants to enter <span>zone ${esc(c.zone)}</span></div><div class="code">${esc(c.user_code)}</div>` +
+      `<div class="meter"><i style="width:${(left / APPROVAL_WINDOW_MS) * 100}%"></i></div>` +
+      `<div class="meta">${Math.round(left / 1000)} s left. Scan to approve with World ID.</div>` +
+      `<a class="link" href="${esc(c.link)}" target="_blank" rel="noreferrer">${esc(c.link)}</a></div>`;
+  }).join('') : '<div class="empty">No approvals waiting</div>');
 };
+showCards();
 const approvals = new EventSource(APPROVALS);
 approvals.onmessage = (e) => { cards = JSON.parse(e.data); showCards(); };
+approvals.onopen = () => pill('p-base', 'ok', 'live');
+approvals.onerror = () => pill('p-base', 'bad', 'offline', `no base feed at ${APPROVALS}`);
 setInterval(() => cards.length && showCards(), 1000);
 
-draw([]);
+render([]);
 const feed = new EventSource(FEED);
 feed.onmessage = (e) => render(JSON.parse(e.data));
-feed.onopen = () => { $('conn').textContent = 'live'; };
-feed.onerror = () => { $('conn').textContent = `no sim feed at ${FEED}`; };
+feed.onopen = () => pill('p-sim', 'ok', 'live');
+feed.onerror = () => pill('p-sim', 'bad', 'offline', `no sim feed at ${FEED}`);
 
 // ---- Replay from the chain ----
 
@@ -167,32 +338,41 @@ async function anchors(): Promise<Anchor[]> {
   }).reverse();
 }
 
-const short = (h: string) => `${h.slice(0, 10)}…${h.slice(-6)}`;
+const count = (n: number) => `<td class="${n ? '' : 'n0'}">${n}</td>`;
 anchors().then((list) => {
-  $('anchors').innerHTML = '<tr><th>block</th><th>episode ID</th><th>decisions</th><th>safe-stops</th><th>approvals</th><th>denials</th><th>storage root</th><th>anchor tx</th><th></th></tr>' +
-    list.map((a, i) => `<tr><td>${a.block}</td><td><code>${short(a.episodeId)}</code></td><td>${a.decisions}</td><td>${a.safeStops}</td>` +
-      `<td>${a.approvals}</td><td>${a.denials}</td><td><a href="${INDEXER}/file?root=${a.root}"><code>${short(a.root)}</code></a></td>` +
-      `<td><a href="${EXPLORER}/tx/${a.tx}"><code>${short(a.tx)}</code></a></td><td><button data-i="${i}">replay</button></td></tr>`).join('');
+  pill('p-0g', 'ok', `${list.length} episode${list.length === 1 ? '' : 's'}`);
+  $('anchors').innerHTML = '<thead><tr><th>Block</th><th>Episode ID</th><th>Decisions</th><th>Safe-stops</th><th>Approvals</th><th>Denials</th><th>Storage root</th><th>Anchor tx</th><th></th></tr></thead><tbody>' +
+    (list.length ? list.map((a, i) => `<tr><td class="mono">${a.block}</td><td><code>${short(a.episodeId)}</code></td>${count(a.decisions)}${count(a.safeStops)}` +
+      `${count(a.approvals)}${count(a.denials)}<td><a href="${INDEXER}/file?root=${a.root}"><code>${short(a.root)}</code></a></td>` +
+      `<td><a href="${EXPLORER}/tx/${a.tx}"><code>${short(a.tx)}</code></a></td><td><button data-i="${i}">Replay</button></td></tr>`).join('')
+      : '<tr><td class="msg" colspan="9">No episodes anchored yet</td></tr>') + '</tbody>';
   $('anchors').onclick = (e) => {
     const i = (e.target as HTMLElement).dataset.i;
     if (i !== undefined) void replay(list[+i]!);
   };
-}, (e: Error) => { $('anchors').innerHTML = `<tr><td>could not read anchors from ${RPC}: ${esc(e.message)}</td></tr>`; });
+}, (e: Error) => {
+  pill('p-0g', 'bad', 'unreachable', e.message);
+  $('anchors').innerHTML = `<tr><td class="msg">Could not read anchors from ${RPC}: ${esc(e.message)}</td></tr>`;
+});
 
 const KINDS = ['decision', 'safe_stop', 'approval', 'denied', 'rejected_command'];
 
 // ponytail: trusts the indexer to serve the bytes behind the root; check the Merkle root in the browser if that matters.
 async function replay(a: Anchor) {
-  $('conn').textContent = `downloading ${short(a.root)} from 0G Storage…`;
+  pill('p-sim', 'warn', `downloading ${short(a.root)}`);
   const res = await fetch(`${INDEXER}/file?root=${a.root}`);
-  if (!res.ok) return void ($('conn').textContent = `0G Storage answered HTTP ${res.status} for ${short(a.root)}`);
+  if (!res.ok) return void pill('p-sim', 'bad', `0G Storage answered HTTP ${res.status}`);
   const entries = (await res.text()).split('\n').filter(Boolean).map((l) => JSON.parse(l) as Entry & { episode?: string })
     .filter((e) => KINDS.includes(e.kind));
-  if (!entries.length) return void ($('conn').textContent = `${short(a.root)} holds no episode entries`);
+  if (!entries.length) return void pill('p-sim', 'bad', `${short(a.root)} holds no episode entries`);
   feed.close();
   approvals.close();
-  $('cards').innerHTML = '';
+  cards = [];
+  showCards();
+  pill('p-sim', 'warn', 'paused for replay');
+  pill('p-base', '', 'paused for replay');
   $('rovers').innerHTML = '';
+  trails.clear();
   const episode = entries[0]!.episode ?? a.episodeId;
   const step = $('step') as HTMLInputElement;
   step.max = String(entries.length - 1);
@@ -200,23 +380,24 @@ async function replay(a: Anchor) {
   const show = (i: number) => {
     i = Math.max(0, Math.min(entries.length - 1, i));
     step.value = String(i);
-    $('at').textContent = `entry ${i + 1} of ${entries.length}`;
+    $('at').textContent = `${i + 1} / ${entries.length}`;
     render(snapshotAt(entries, i, episode));
     if (i === entries.length - 1) stop();
   };
-  const stop = () => { clearInterval(timer); timer = 0; $('play').textContent = 'play'; };
+  const stop = () => { clearInterval(timer); timer = 0; $('play').textContent = 'Play'; };
   $('prev').onclick = () => { stop(); show(+step.value - 1); };
   $('next').onclick = () => { stop(); show(+step.value + 1); };
   step.oninput = () => { stop(); show(+step.value); };
   $('play').onclick = () => {
     if (timer) return stop();
     if (+step.value === entries.length - 1) show(0);
-    $('play').textContent = 'pause';
+    $('play').textContent = 'Pause';
     timer = window.setInterval(() => show(+step.value + 1), 1000);
   };
   $('live').onclick = () => location.reload();
   $('player').hidden = false;
-  $('conn').innerHTML = `replay of ${esc(episode)} · anchored in <a href="${EXPLORER}/tx/${a.tx}">${short(a.tx)}</a>, ` +
+  $('ep').hidden = true; // the replay line names the episode
+  $('mode').innerHTML = `replay of ${esc(episode)}, anchored in <a href="${EXPLORER}/tx/${a.tx}">${short(a.tx)}</a>, ` +
     `file <a href="${INDEXER}/file?root=${a.root}">${short(a.root)}</a> on 0G Storage`;
   show(0);
 }
@@ -246,7 +427,7 @@ function robotAt(entries: Entry[], episode: string): Snapshot {
   const reason = e.kind === 'approval' ? `zone ${e.zone}: approved by ${e.approver}` : moving ? `0G: ${e.action}` : (e.reason ?? e.kind);
   return {
     robot: e.robot ?? '', episode, state: moving ? 'DRIVING' : 'SAFE_STOPPED', reason,
-    ...pose, battery: 0, seq: e.seq ?? 0, pending: null, last, recent: entries.slice(Math.max(0, i - 7), i + 1).reverse(),
+    ...pose, battery: NaN, seq: e.seq ?? 0, pending: null, last, recent: entries.slice(Math.max(0, i - 7), i + 1).reverse(),
   };
 }
 
@@ -264,22 +445,29 @@ let members: Roster = {};
 const contexts: Record<string, string | null> = {};
 function showRoster() {
   const now = Date.now();
-  $('roster').innerHTML = '<tr><th>name</th><th>role</th><th>expires</th><th>mesh key (invite)</th><th>may approve</th><th>agent-context</th></tr>' +
-    Object.entries(members).map(([name, m]) => {
+  const entries = Object.entries(members);
+  $('roster').innerHTML = '<thead><tr><th>Name</th><th>Role</th><th>Expires</th><th>Mesh key</th><th>Approves</th><th>agent-context</th></tr></thead><tbody>' +
+    (entries.length ? entries.map(([name, m]) => {
       const may = authorize(members, name, APPROVER_ROLES, now);
-      return `<tr><td>${esc(name)}</td><td>${esc(m.role ?? '(unset)')}</td>` +
-        `<td${now < m.expiry ? '' : ' style="color:#d0342c"'}>${new Date(m.expiry).toLocaleString()}${now < m.expiry ? '' : ' (expired)'}</td>` +
-        `<td><code>${m.address ? short(m.address) : '—'}</code></td><td>${may ? (m.role === 'robot' || m.role === 'base' ? '—' : `no: ${esc(may)}`) : 'yes'}</td>` +
-        `<td>${esc(contexts[name] ?? '')}</td></tr>`;
-    }).join('');
+      const live = now < m.expiry;
+      return `<tr><td title="${esc(name)}">${esc(name.split('.')[0])}</td><td class="${esc(m.role ?? 'na')}">${esc(m.role ?? 'unset')}</td>` +
+        `<td class="${live ? '' : 'expired'}" title="${esc(new Date(m.expiry).toLocaleString())}">${live ? rel(m.expiry, now) : `expired ${rel(m.expiry, now)}`}</td>` +
+        `<td><code class="${m.address ? '' : 'na'}" title="${esc(m.address ?? '')}">${m.address ? short(m.address) : '—'}</code></td>` +
+        `<td>${!may ? '<span class="yes">yes</span>' : m.role === 'robot' || m.role === 'base' ? '<span class="na">—</span>' : `<span class="no" title="${esc(may)}">no</span>`}</td>` +
+        `<td class="na ctx" title="${esc(contexts[name] ?? '')}">${esc(contexts[name] ?? '')}</td></tr>`;
+    }).join('') : '<tr><td class="msg" colspan="6">The fleet name lists no members</td></tr>') + '</tbody>';
 }
 async function loadRoster() {
   members = await readRoster(ens, inviteAddress, members);
   await Promise.all(Object.entries(members).filter(([, m]) => m.role === 'robot').map(async ([name]) => {
     contexts[name] = await ens.getEnsText({ name, key: 'agent-context' });
   }));
+  pill('p-ens', 'ok', `${Object.keys(members).length} members`);
   showRoster();
 }
-const rosterFailed = (e: Error) => { $('roster').innerHTML = `<tr><td>could not read the roster from ${SEPOLIA_RPC}: ${esc(e.message.split('\n')[0])}</td></tr>`; };
+const rosterFailed = (e: Error) => {
+  pill('p-ens', 'bad', 'unreachable', e.message.split('\n')[0]);
+  $('roster').innerHTML = `<tr><td class="msg">Could not read the roster from ${SEPOLIA_RPC}: ${esc(e.message.split('\n')[0])}</td></tr>`;
+};
 loadRoster().catch(rosterFailed);
-setInterval(() => loadRoster().catch(() => showRoster()), 60_000); // keep the last read if a refresh fails
+setInterval(() => loadRoster().catch(() => { pill('p-ens', 'warn', 'stale', 'the last refresh failed; showing the previous read'); showRoster(); }), 60_000); // keep the last read if a refresh fails
