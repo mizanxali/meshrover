@@ -256,10 +256,10 @@ before the motion an entry leads to.
 |---|---|---|
 | **0G Compute** | A vision model picks every move, called through the Router in `verified` trust mode with `verify_tee: true` and temperature 0. A reply without `tee_verified: true` is an error, never a decision. At startup the base checks the model is listed, takes images and is TEE-attested, or refuses to start | [`src/base/decide.ts:30`](src/base/decide.ts#L30) (`checkModel`), [`:59`](src/base/decide.ts#L59) (`decide`), [`:93`](src/base/decide.ts#L93) (TEE check) |
 | **0G Storage** | One JSONL file per episode, with every decision's request ID and frame, uploaded when the episode ends (retried every 15 s while offline) | [`src/base/record.ts:61`](src/base/record.ts#L61) (`record`), [`:74`](src/base/record.ts#L74) (upload) |
-| **0G Chain** | `EpisodeAnchor` on Galileo: one record per episode (storage root and counts), written by the base only, once per episode. The dashboard lists the anchors and replays an episode from its root | [`contracts/src/EpisodeAnchor.sol:23`](contracts/src/EpisodeAnchor.sol#L23), [`src/base/record.ts:88`](src/base/record.ts#L88), [`web/src/main.ts:323`](web/src/main.ts#L323) |
+| **0G Chain** | `EpisodeAnchor` on Galileo: one record per episode (storage root and counts), written by the base only, once per episode. The dashboard lists the anchors and replays an episode from its root | [`contracts/src/EpisodeAnchor.sol:23`](contracts/src/EpisodeAnchor.sol#L23), [`src/base/record.ts:88`](src/base/record.ts#L88), [`web/src/main.ts:326`](web/src/main.ts#L326) |
 | **World ID Agent Pass** | A human checkpoint before a rover enters zone C: the base runs World's device flow, sends the link and code to the operator's phone over the mesh (the only place to approve; the dashboard shows only who is waiting), and validates the ID token itself (RS256, issuer, audience, `auth_time` within this attempt, a World `acr`, `amr` with `pop`) before issuing a 10 s single-use approval | [`src/base/world.ts:57`](src/base/world.ts#L57) (`verifyHuman`), [`:79`](src/base/world.ts#L79) (validation), [`src/base/main.ts:195`](src/base/main.ts#L195), [`WORLD_FEEDBACK.md`](WORLD_FEEDBACK.md) |
 | **ENSv2** | The fleet is a namespace on Sepolia: a subname per robot, the base and each operator, each with its own `PermissionedResolver`, a role, an expiry, and for engines a signed mesh invite (`eth.meshrover-demo.role`, `.invite`, `.members`; ENSIP-26 `agent-context` and `agent-endpoint[web]` on robots). The base reads the roster every 60 s, caches it and relays it over the mesh; `authorize()` checks expiry, role and mesh key on both the base and the rover | [`contracts/script/Fleet.s.sol:191`](contracts/script/Fleet.s.sol#L191), [`src/base/roster.ts:35`](src/base/roster.ts#L35), [`src/protocol.ts:138`](src/protocol.ts#L138) |
-| **Offline Protocol** | The mesh: each rover and the base drive their own engine through its local API; rover B reaches the base only through rover A; phones join over Bluetooth | [`src/engine.ts:9`](src/engine.ts#L9), [`src/base/main.ts:46`](src/base/main.ts#L46), [`src/sim/main.ts:46`](src/sim/main.ts#L46), [`operator-app/App.tsx`](operator-app/App.tsx) |
+| **Offline Protocol** | The mesh: each rover and the base drive their own engine through its local API; rover B reaches the base only through rover A; phones join over Bluetooth | [`src/engine.ts:9`](src/engine.ts#L9), [`src/base/main.ts:46`](src/base/main.ts#L46), [`src/sim/main.ts:36`](src/sim/main.ts#L36), [`operator-app/App.tsx`](operator-app/App.tsx) |
 
 The safety checks every rule above depends on are in
 [`src/protocol.ts`](src/protocol.ts): `parseDecision` (line 61),
@@ -276,8 +276,8 @@ an `unregister` only reaches it at its next roster refresh.
 **0G Galileo (chain 16602)**
 
 - `EpisodeAnchor`: [`0x8530Ec9B37EDc064527c5Dd20BAFE264F78cAF67`](https://chainscan-galileo.0g.ai/address/0x8530Ec9B37EDc064527c5Dd20BAFE264F78cAF67)
-- An anchor transaction: [`0x4b33fb2c…a096b5c`](https://chainscan-galileo.0g.ai/tx/0x4b33fb2c653cebb44d3785b4e2799d63763ec3d8f33823e1790ce9449a096b5c)
-- A 0G Storage root: `0x1fe2417df68ab43bc14e87b009f6211da26d3cb63428256e7ae719e7f1232818`
+- An episode anchor (`ep-1107-0044`, verified mode): [`0x199835fd…e416bb0`](https://chainscan-galileo.0g.ai/tx/0x199835fda89847975e4fe2323b7e114aa3e6ae3d1c5f6265de0e493e74416bb0)
+- Its 0G Storage root: `0x162caa009b38fb3240ce7b81316160115f363f678b123cc6b2a2f6414622e243`
   (`https://indexer-storage-testnet-turbo.0g.ai/file?root=<root>`)
 
 **Sepolia (ENSv2)**
