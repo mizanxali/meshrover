@@ -3,10 +3,9 @@
 // latest 0G decision with the request ID and the frame the model saw).
 // Replay: the episodes anchored on Galileo, each downloaded from 0G Storage by
 // the root in its anchor and stepped through on the same map.
-// Approvals: the base's feed on this Mac lists approvals waiting on an operator
-// (World's link and code, as a QR code for the operator's phone).
+// Approvals: the base's feed on this Mac lists the rovers waiting at a zone gate
+// (robot, zone, deadline). Approving happens only on the operator's phone.
 // Roster: the fleet's members as ENSv2 on Sepolia has them, read here from the chain.
-import { renderSVG } from 'uqr';
 import { EDGES, NODES, PALLETS, ZONES } from '../../src/sim/map.ts';
 import { FLEET as FLEET_NAME, SEPOLIA_RPC, readRoster, sepoliaClient } from '../../src/base/roster.ts';
 import { APPROVAL_WINDOW_MS, APPROVER_ROLES, BASE_TIMEOUT_MS, type Roster, authorize } from '../../src/protocol.ts';
@@ -16,7 +15,7 @@ type Entry = {
   pose?: { x: number; y: number; heading: number }; frame_jpeg_b64?: string; model?: string; tee_verified?: boolean;
   verifiability?: string; t_request_ms?: number; t_decision_ms?: number; t_ms?: number; zone?: string; approver?: string;
 };
-type Card = { robot: string; zone: string; link: string; user_code: string; deadline: number };
+type Card = { robot: string; zone: string; deadline: number };
 type Snapshot = {
   robot: string; episode: string; state: string; reason: string; x: number; y: number; heading: number;
   battery: number; seq: number; pending: number | null; recent: Entry[];
@@ -286,17 +285,15 @@ function show(s: Snapshot) {
   }).join('') : '<li><span></span><span></span><span class="what">Nothing logged yet</span></li>');
 }
 
-// The approvals waiting on an operator. The link is the operator's to open; it carries no secret.
+// The rovers waiting on an operator's approval, which happens in the phone app.
 let cards: Card[] = [];
 const showCards = () => {
   $('ncards').textContent = cards.length ? `${cards.length} waiting` : '';
   set($('cards'), cards.length ? cards.map((c) => {
     const left = Math.max(0, c.deadline - Date.now());
-    return `<div class="card"><div class="qr">${renderSVG(c.link, { border: 1 })}</div>` +
-      `<div class="t">${esc(c.robot.split('.')[0])} wants to enter <span>zone ${esc(c.zone)}</span></div><div class="code">${esc(c.user_code)}</div>` +
+    return `<div class="card"><div class="t">${esc(c.robot.split('.')[0])} wants to enter <span>zone ${esc(c.zone)}</span></div>` +
       `<div class="meter"><i style="width:${(left / APPROVAL_WINDOW_MS) * 100}%"></i></div>` +
-      `<div class="meta">${Math.round(left / 1000)} s left. Scan to approve with World ID.</div>` +
-      `<a class="link" href="${esc(c.link)}" target="_blank" rel="noreferrer">${esc(c.link)}</a></div>`;
+      `<div class="meta">${Math.round(left / 1000)} s left. Waiting for a supervisor to approve with World ID in the operator app.</div></div>`;
   }).join('') : '<div class="empty">No approvals waiting</div>');
 };
 showCards();

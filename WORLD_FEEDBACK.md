@@ -1,8 +1,8 @@
 # World ID Agent Pass: integration debrief
 
 How Mesh Rover uses it: before a rover enters restricted zone C, the base runs
-the device flow, shows the link and code (on the dashboard as a QR code, and on
-the operator's phone), polls the token endpoint, and validates the ID token
+the device flow, sends the link and code to the operator's phone over the mesh
+(the phone app is the only place to approve), polls the token endpoint, and validates the ID token
 itself (`src/base/world.ts`). A validated `(iss, sub)` maps to an enrolled
 operator, and the rover enters only on a single-use, short-lived approval
 naming that operator. Declined, expired and unreachable attempts all leave the

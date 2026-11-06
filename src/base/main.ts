@@ -2,7 +2,8 @@
 // 0G for each decision and writes the episode file (JSONL, frames included).
 // It also provides `fleet.approve`: a World ID check by an enrolled operator
 // before a rover enters a restricted zone. Pending approvals are served to the
-// dashboard on http://127.0.0.1:7301/events (the link and code only, no secret).
+// dashboard on http://127.0.0.1:7301/events (robot, zone and deadline only:
+// World's link and code go to the operators' phones, which approve).
 // Operators' phones subscribe over the mesh (BLE to this engine) to
 // `fleet.status` (each rover's state, as the base last heard it) and
 // `fleet.approvals` (the same cards), so they keep working with no internet.
@@ -146,12 +147,14 @@ async function onDecide(e: EngineEvent) {
   return respond('ok', { v: 1, seq, action: d.action, reason: d.reason, model: d.model, request_id: d.request_id, tee_verified: true, verifiability });
 }
 
-// Approval cards waiting on an operator, by robot, for the dashboard.
+// Approval cards waiting on an operator, by robot. The phones get the whole card
+// (World's link and code) on `fleet.approvals`; the dashboard only shows who is
+// waiting, so the phone is the one place to approve.
 const cards = new Map<string, Card & { robot: string; zone: string }>();
 const watchers = new Set<ServerResponse>();
 const showCards = () => {
   const list = [...cards.values()];
-  const msg = `data: ${JSON.stringify(list)}\n\n`;
+  const msg = `data: ${JSON.stringify(list.map(({ robot, zone, deadline }) => ({ robot, zone, deadline })))}\n\n`;
   for (const w of watchers) w.write(msg);
   void publish('fleet.approvals', 'pending', 'cards', list);
 };
