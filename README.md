@@ -1,5 +1,7 @@
 # MeshRover
 
+![MeshRover: robots that never need the internet, and stop safely when their AI is out of reach](assets/cover.png)
+
 **Robots that never need the internet, and stop safely when their AI is out of reach.**
 
 Rovers talk to their base station entirely offline, over an encrypted
