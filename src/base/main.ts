@@ -20,7 +20,7 @@ import {
   parseApproveRequest, parseDecideRequest,
 } from '../protocol.ts';
 import { type EngineEvent, connectEngine } from '../engine.ts';
-import { MOCK, checkModel, decide } from './decide.ts';
+import { MOCK, UNVERIFIED, checkModel, decide } from './decide.ts';
 import { loadSigner, record } from './record.ts';
 import { FLEET, readRoster, sepoliaClient } from './roster.ts';
 import { type Card, operatorOf, verifyHuman } from './world.ts';
@@ -30,7 +30,8 @@ const KEY = process.env.ZG_API_KEY || (() => { throw new Error('ZG_API_KEY missi
 const now = new Date();
 const pad = (n: number) => String(n).padStart(2, '0');
 // A mock run's episode is named as one, so it can never be anchored as a 0G record.
-const episode = (process.env.EPISODE || `ep-${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`) + (MOCK ? '-mock' : '');
+const episode = (process.env.EPISODE || `ep-${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`) + (MOCK ? '-mock' : UNVERIFIED ? '-unverified' : '');
+if (UNVERIFIED) console.warn('ZG_UNVERIFIED: 0G in standard tier, tee_verified not checked by a TEE (allowed by 0G during their outage).');
 if (MOCK) console.warn(`MOCK ROUTER at ${process.env.ZG_ROUTER_URL}: decisions are not from 0G. Development only.`);
 
 mkdirSync(`episodes/${episode}`, { recursive: true });

@@ -8,6 +8,13 @@ const ROUTER = process.env.ZG_ROUTER_URL || REAL_ROUTER;
 /** Only when ZG_ROUTER_URL names spikes/mock-router.ts, for building while 0G is down. Never a fallback. */
 export const MOCK = ROUTER !== REAL_ROUTER;
 const MODEL = MOCK ? 'mock' : process.env.ZG_VISION_MODEL || 'qwen3-vl-plus';
+/**
+ * Opt-in only, never a fallback: 0G's team allowed it during their outage of 2026-11-06, when no TEE-attested vision
+ * provider answered. A model that is up is called in `standard` tier, and a reply with no `tee_verified` is taken as
+ * verified. The tier text says so, the episode is named `-unverified`, and a `tee_verified: false` is still refused.
+ */
+export const UNVERIFIED = !MOCK && process.env.ZG_UNVERIFIED === '1';
+const UNVERIFIED_TIER = 'UNVERIFIED: standard tier during the 0G outage; tee_verified set by the base, with 0G\'s permission, not checked by a TEE';
 
 /** What `tee_verified` promises depends on the model's tier, so it travels with every decision. */
 const TIERS: Record<string, string> = {
@@ -25,6 +32,7 @@ export async function checkModel(): Promise<{ model: string; verifiability: stri
   if (!m) throw new Error(`${MODEL} is not on the 0G Router any more (set ZG_VISION_MODEL)`);
   if (!m.architecture?.input_modalities?.includes('image')) throw new Error(`${MODEL} does not take images`);
   if (MOCK) return { model: MODEL, verifiability: 'MOCK: a local stand-in for the 0G Router; nothing is attested, nothing is 0G' };
+  if (UNVERIFIED) return { model: MODEL, verifiability: UNVERIFIED_TIER };
   if (m.tee_attested !== true || !TIERS[m.verifiability]) throw new Error(`${MODEL} is not TEE-attested (${m.verifiability})`);
   return { model: MODEL, verifiability: TIERS[m.verifiability]! };
 }
@@ -55,7 +63,7 @@ export async function decide(req: DecideRequest, key: string, verifiability: str
       method: 'POST',
       signal: AbortSignal.timeout(BASE_TIMEOUT_MS),
       headers: { Authorization: `Bearer ${MOCK ? 'mock' : key}`, // the real key goes only to the real Router
-        'Content-Type': 'application/json', 'X-0G-Provider-Trust-Mode': 'verified' },
+        'Content-Type': 'application/json', 'X-0G-Provider-Trust-Mode': UNVERIFIED ? 'standard' : 'verified' },
       body: JSON.stringify({
         model: MODEL,
         verify_tee: true,
@@ -79,7 +87,7 @@ export async function decide(req: DecideRequest, key: string, verifiability: str
   const request_id = typeof trace?.request_id === 'string' ? trace.request_id : undefined;
   if (!res.ok) return { error: `0G answered HTTP ${res.status}`, request_id };
   if (!request_id) return { error: '0G reply has no request ID' };
-  if (trace.tee_verified !== true) return { error: '0G reply not TEE-verified', request_id };
+  if (trace.tee_verified === false || (!UNVERIFIED && trace.tee_verified !== true)) return { error: '0G reply not TEE-verified', request_id };
   const d = parseDecision(body?.choices?.[0]?.message?.content, req.options);
   if (!d) return { error: '0G reply is not an offered action', request_id };
   return {

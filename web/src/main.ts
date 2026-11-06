@@ -267,7 +267,7 @@ function show(s: Snapshot) {
     set($('.decision'), `<div class="act" style="color:${d.action === 'stop' ? '#f04444' : '#22c55e'}">${esc(words(d.action))}</div>` +
       `<div class="why">${esc(d.reason)}</div><dl>` +
       `<dt>at</dt><dd>${esc(d.checkpoint)}, seq ${d.seq}</dd>` +
-      `<dt>TEE</dt><dd class="clip" title="${esc(d.verifiability)}">${d.tee_verified ? '<span class="good">verified</span>' : '<span class="warn-t">not verified</span>'} · ${esc(d.verifiability || 'tier unknown')}</dd>` +
+      `<dt>TEE</dt><dd class="clip" title="${esc(d.verifiability)}">${d.tee_verified && !d.verifiability.startsWith('UNVERIFIED') ? '<span class="good">verified</span>' : '<span class="warn-t">not verified</span>'} · ${esc(d.verifiability || 'tier unknown')}</dd>` +
       `<dt>latency</dt><dd>${d.latency_ms} ms<span class="lat"><i style="width:${Math.min(1, d.latency_ms / BASE_TIMEOUT_MS) * 100}%;background:${latColor}"></i></span></dd>` +
       `<dt>model</dt><dd>${esc(d.model)}</dd><dt>request</dt><dd>${esc(d.request_id)}</dd></dl>`);
     const img = $('img') as HTMLImageElement;
