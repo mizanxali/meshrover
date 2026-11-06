@@ -155,6 +155,21 @@ bodies are capped at 64 KiB):
 }
 ```
 
+The base turns each request into one chat completion on the 0G Router
+(temperature 0, `response_format: json_object`, `verify_tee: true`). The user
+message is `{checkpoint, options, pose}` as JSON plus the frame as a JPEG data
+URL. The system prompt
+([`src/base/decide.ts:41`](src/base/decide.ts#L41)):
+
+```text
+You drive a warehouse rover. The image is its forward camera at a checkpoint.
+It shows up to three regions: LEFT, AHEAD and RIGHT. A dark opening is an aisle; orange shelving means there is no aisle that way; a brown PALLET box blocks that aisle; a blue ROVER is another robot in the way, which may move off (stop waits for it).
+proceed = drive AHEAD, turn_left = take the LEFT aisle, turn_right = take the RIGHT aisle, turn_around = go back the way you came, stop = hold here.
+Some frames also have a SAFETY CAM panel on the right: a live photo from the rover's real camera. If a hand or an object is close to the lens, covering much of the picture, choose stop, whatever the drawn view shows. A person further back (the operator at the desk) is normal.
+Never choose an aisle blocked by a pallet. If you are unsure, choose stop.
+Reply with JSON {"action": "...", "reason": "..."} only. action must be one of the options given.
+```
+
 Decision response:
 
 ```json
@@ -163,7 +178,7 @@ Decision response:
   "seq": 14,
   "action": "turn_left",
   "reason": "pallet blocks the aisle ahead",
-  "model": "qwen3-vl-plus",
+  "model": "0gm-1.0-35b-a3b",
   "request_id": "<x_0g_trace.request_id>",
   "tee_verified": true,
   "verifiability": "<the model's TEE tier, in words>"
@@ -220,7 +235,7 @@ anchored root covers the frames too:
   "request_id": "<x_0g_trace.request_id>",
   "action": "turn_left",
   "reason": "pallet blocks the aisle ahead",
-  "model": "qwen3-vl-plus",
+  "model": "0gm-1.0-35b-a3b",
   "zg_res_key": "<ZG-Res-Key header>",
   "provider": "0x...",
   "tee_verified": true,
@@ -237,7 +252,7 @@ before the motion an entry leads to.
 
 | Partner | What it does here | Where it lives |
 |---|---|---|
-| **0G Compute** | A vision model picks every move, called through the Router in `verified` trust mode with `verify_tee: true` and temperature 0. A reply without `tee_verified: true` is an error, never a decision. At startup the base checks the model is listed, takes images and is TEE-attested, or refuses to start | [`src/base/decide.ts:29`](src/base/decide.ts#L29) (`checkModel`), [`:58`](src/base/decide.ts#L58) (`decide`), [`:90`](src/base/decide.ts#L90) (TEE check) |
+| **0G Compute** | A vision model picks every move, called through the Router in `verified` trust mode with `verify_tee: true` and temperature 0. A reply without `tee_verified: true` is an error, never a decision. At startup the base checks the model is listed, takes images and is TEE-attested, or refuses to start | [`src/base/decide.ts:30`](src/base/decide.ts#L30) (`checkModel`), [`:59`](src/base/decide.ts#L59) (`decide`), [`:93`](src/base/decide.ts#L93) (TEE check) |
 | **0G Storage** | One JSONL file per episode, with every decision's request ID and frame, uploaded when the episode ends (retried every 15 s while offline) | [`src/base/record.ts:61`](src/base/record.ts#L61) (`record`), [`:74`](src/base/record.ts#L74) (upload) |
 | **0G Chain** | `EpisodeAnchor` on Galileo: one record per episode (storage root and counts), written by the base only, once per episode. The dashboard lists the anchors and replays an episode from its root | [`contracts/src/EpisodeAnchor.sol:23`](contracts/src/EpisodeAnchor.sol#L23), [`src/base/record.ts:88`](src/base/record.ts#L88), [`web/src/main.ts:323`](web/src/main.ts#L323) |
 | **World ID Agent Pass** | A human checkpoint before a rover enters zone C: the base runs World's device flow, sends the link and code to the operator's phone over the mesh (the only place to approve; the dashboard shows only who is waiting), and validates the ID token itself (RS256, issuer, audience, `auth_time` within this attempt, a World `acr`, `amr` with `pop`) before issuing a 10 s single-use approval | [`src/base/world.ts:57`](src/base/world.ts#L57) (`verifyHuman`), [`:79`](src/base/world.ts#L79) (validation), [`src/base/main.ts:195`](src/base/main.ts#L195), [`WORLD_FEEDBACK.md`](WORLD_FEEDBACK.md) |
