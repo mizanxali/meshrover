@@ -11,7 +11,7 @@
 // links, and how many messages it has carried for others.
 import { MeshServices, OfflineProtocol } from '@offline-protocol/mesh-sdk';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Linking, PermissionsAndroid, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, Image, Linking, PermissionsAndroid, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 type Status = { robot: string; episode: string; state: string; reason: string; checkpoint?: string; request_id?: string; t_ms: number };
@@ -150,7 +150,10 @@ export default function App() {
       <SafeAreaView style={s.screen}>
         <ScrollView contentContainerStyle={s.body}>
           <View style={s.row}>
-            <Text style={s.h1}>MeshRover</Text>
+            <View style={s.brand}>
+              <Image source={require('./logo.png')} style={s.logo} />
+              <Text style={s.h1}>MeshRover</Text>
+            </View>
             <View style={s.state}>
               <Dot color={TONE[conn]} pulse={conn === 'ok'} />
               <Text style={[s.stateText, { color: TONE[conn] }]}>{conn === 'ok' ? 'Connected' : conn === 'bad' ? 'Error' : 'Connecting'}</Text>
@@ -304,6 +307,8 @@ const MONO = Platform.select({ ios: 'Menlo', default: 'monospace' });
 const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: C.bg },
   body: { padding: 14, gap: 10, paddingBottom: 28 },
+  brand: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  logo: { width: 26, height: 26 },
   h1: { color: C.text, fontSize: 24, fontWeight: '700', paddingVertical: 6 },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   state: { flexDirection: 'row', alignItems: 'center', gap: 6 },

@@ -55,7 +55,10 @@ const bar = (title: string, sub = '', right = '') =>
 const app = document.querySelector<HTMLElement>('#app')!;
 app.innerHTML = `
   <header>
-    <div class="t">MeshRover<span>${esc(FLEET_NAME)}</span></div>
+    <div class="t"><svg class="logo" viewBox="56 64 400 360" aria-hidden="true"><g stroke="#666" stroke-width="28" stroke-linecap="round">
+      <line x1="256" y1="168" x2="132" y2="372"/><line x1="256" y1="168" x2="380" y2="372"/><line x1="132" y1="372" x2="380" y2="372"/></g>
+      <circle cx="132" cy="372" r="46" fill="#fff"/><circle cx="380" cy="372" r="46" fill="#fff"/>
+      <path d="M256 72 L328 226 L256 194 L184 226 Z" fill="#22c55e"/></svg>MeshRover<span>${esc(FLEET_NAME)}</span></div>
     <div class="status">
       <span id="p-sim"><i class="dot"></i>Sim <b>connecting</b></span>
       <span id="p-base"><i class="dot"></i>Base <b>connecting</b></span>
