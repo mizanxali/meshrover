@@ -17,8 +17,12 @@ Kept up to date during the build. Dates are IST, November 2026.
   with `verification_uri_complete`, `user_code`, `expires_in: 1200` and
   `interval: 5`. The production endpoint still answers the same way from the
   base (6 Nov).
-- **A validated ID token:** not yet. No account we could create could complete
-  the flow (see below).
+- **A validated ID token:** on 6 Nov, about a day after the first device
+  authorization, after we registered a sandbox portal app and verified a
+  sandbox World ID in the sandbox app. The iPhone's sandbox World App enrolled an
+  operator (`acr` `…/acr/orb`), and its next approval let rover A into zone C
+  26 s after it reached the gate. Until then no account we could create could
+  complete the flow (see below).
 
 ## What worked well
 
@@ -48,14 +52,19 @@ Kept up to date during the build. Dates are IST, November 2026.
    allowed.
 4. **Telling a fresh proof from a passkey takes inference.** A passkey login
    reports `amr` `["pop", "user", "mfa"]`, so checking for `pop` isn't enough.
-   We accept a proof only when `amr` contains `pop` and not `mfa`. The docs
-   never state that rule; we inferred it from the examples. For a robot's
-   safety approval, "this was a fresh World ID proof" is the property we need,
-   and one claim that says so would remove the guesswork.
+   We first accepted a proof only when `amr` contained `pop` and not `mfa`,
+   inferred from the examples. On 6 Nov the sandbox app returned exactly
+   `["pop", "user", "mfa"]` through the device flow, and World's team at the
+   booth confirmed a passkey sign-in is fine, so we now require `pop` and an
+   `auth_time` inside the attempt. The docs could say this outright.
 5. **The error for "the person declined in World App" isn't documented.** We
    treat `access_denied` as a decline, but the docs also return it for an unmet
    essential `acr` and for a `sub` mismatch, so the base can't tell the
-   operator which one happened.
+   operator which one happened. Seen on 6 Nov: a second sandbox identity, on
+   Android, got `access_denied` with `error_description` "Authorization was
+   denied." 10 to 25 s after approving, five times in a row, while the
+   iPhone's identity enrolled with the same client. Nothing in the response
+   says why.
 6. **A redirect URI is required for a device-only client.** We registered a
    placeholder HTTPS URL that's never used.
 7. **The client auth method can't be changed after registration.** It's easy

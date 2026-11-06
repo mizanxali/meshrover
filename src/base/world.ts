@@ -2,8 +2,10 @@
 // entirely on the base (the client secret never leaves it). The operator opens
 // the link on their own phone; the base polls, then checks the ID token itself:
 // RS256 against World's JWKS, the exact issuer, our client ID as audience,
-// expiry, an `auth_time` inside this attempt, a World `acr`, and an `amr` that
-// is a fresh World ID proof (`pop`), not a passkey (`mfa`).
+// expiry, an `auth_time` inside this attempt, a World `acr`, and an `amr` with
+// `pop` (a World ID proof). A passkey sign-in (`["pop","user","mfa"]`) is
+// accepted: World's team confirmed it suffices, and `auth_time` still pins it
+// to this attempt.
 //
 // `(iss, sub)` → operator name is private to the base (.run/base/operators.json):
 // `sub` is a pairwise ID and is never logged or published.
@@ -67,6 +69,7 @@ export async function verifyHuman(onCard: (c: Card) => void, windowMs = APPROVAL
       await new Promise((r) => setTimeout(r, interval));
       const t = await post(conf.token_endpoint, { grant_type: 'urn:ietf:params:oauth:grant-type:device_code', device_code: da.body.device_code, client_id: id });
       const err = t.body.error;
+      if (process.env.WORLD_DEBUG) console.error(`poll: HTTP ${t.status} ${err ? `${err} ${t.body.error_description ?? ''}` : (t.body.id_token ? 'id_token' : JSON.stringify(Object.keys(t.body)))}`); // never the token itself
       if (err === 'authorization_pending') continue;
       if (err === 'slow_down') { interval += 5000; continue; }
       if (err === 'access_denied') return { denied: 'the operator declined in World App' };
@@ -78,13 +81,14 @@ export async function verifyHuman(onCard: (c: Card) => void, windowMs = APPROVAL
       if (typeof p.auth_time !== 'number' || p.auth_time < started - 5) return { denied: 'ID token is not from this attempt' };
       if (typeof p.acr !== 'string' || !ACRS.includes(p.acr)) return { denied: `not a verified World ID (acr ${String(p.acr)})` };
       const amr = Array.isArray(p.amr) ? p.amr.filter((a): a is string => typeof a === 'string') : [];
-      if (!amr.includes('pop') || amr.includes('mfa')) return { denied: `not a fresh World ID proof (amr ${amr.join(',')})` };
+      if (!amr.includes('pop')) return { denied: `not a World ID proof (amr ${amr.join(',')})` };
       return { iss: p.iss!, sub: p.sub, acr: p.acr, amr, auth_time: p.auth_time };
     }
     return { denied: `no approval within ${windowMs / 1000} s` };
   } catch (e) {
-    const err = e as Error & { cause?: { code?: string }; code?: string };
-    if (err.code?.startsWith('ERR_J')) return { denied: `ID token rejected: ${err.message}` }; // jose's errors
+    const err = e as Error & { cause?: { code?: string }; code?: unknown };
+    // a timeout is a DOMException whose code is a number
+    if (typeof err.code === 'string' && err.code.startsWith('ERR_J')) return { denied: `ID token rejected: ${err.message}` }; // jose's errors
     return { denied: `World unreachable: ${err.name === 'TimeoutError' ? 'no reply in 10 s' : (err.cause?.code ?? err.message)}` };
   }
 }
@@ -105,7 +109,8 @@ if (import.meta.main) {
   process.loadEnvFile();
   const name = process.argv[2];
   if (!name) throw new Error('usage: npm run enroll -- <fleet name, e.g. alice.meshrover-demo.eth>');
-  const h = await verifyHuman((c) => console.log(`Open on ${name}'s phone, within ${APPROVAL_WINDOW_MS / 1000} s:\n  ${c.link}\n  (code ${c.user_code})`));
+  const ENROLL_WINDOW_MS = 600_000; // no robot waits on an enrollment
+  const h = await verifyHuman((c) => console.log(`Open on ${name}'s phone, within ${ENROLL_WINDOW_MS / 1000} s:\n  ${c.link}\n  (code ${c.user_code})`), ENROLL_WINDOW_MS);
   if ('denied' in h) {
     console.error(`not enrolled: ${h.denied}`);
     process.exit(1);
