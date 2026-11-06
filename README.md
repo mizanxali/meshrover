@@ -9,6 +9,9 @@ the base can't reach 0G, the rovers stop for real. They also ask a verified
 human (World ID) before anything risky, and obey only keys that their fleet's
 ENSv2 records allow. Built for ETHGlobal Mumbai.
 
+**Live dashboard:** [meshrover.app](https://meshrover.app) shows the fleet roster read from ENS,
+the episodes anchored on 0G Chain, and a replay of each from 0G Storage.
+
 ## The problem
 
 Field robots (warehouses, farms, construction, inspection, search and rescue)
@@ -238,7 +241,7 @@ before the motion an entry leads to.
 | **0G Storage** | One JSONL file per episode, with every decision's request ID and frame, uploaded when the episode ends (retried every 15 s while offline) | [`src/base/record.ts:61`](src/base/record.ts#L61) (`record`), [`:74`](src/base/record.ts#L74) (upload) |
 | **0G Chain** | `EpisodeAnchor` on Galileo: one record per episode (storage root and counts), written by the base only, once per episode. The dashboard lists the anchors and replays an episode from its root | [`contracts/src/EpisodeAnchor.sol:23`](contracts/src/EpisodeAnchor.sol#L23), [`src/base/record.ts:88`](src/base/record.ts#L88), [`web/src/main.ts:323`](web/src/main.ts#L323) |
 | **World ID Agent Pass** | A human checkpoint before a rover enters zone C: the base runs World's device flow, sends the link and code to the operator's phone over the mesh (the only place to approve; the dashboard shows only who is waiting), and validates the ID token itself (RS256, issuer, audience, `auth_time` within this attempt, a World `acr`, `amr` with `pop`) before issuing a 10 s single-use approval | [`src/base/world.ts:57`](src/base/world.ts#L57) (`verifyHuman`), [`:79`](src/base/world.ts#L79) (validation), [`src/base/main.ts:195`](src/base/main.ts#L195), [`WORLD_FEEDBACK.md`](WORLD_FEEDBACK.md) |
-| **ENSv2** | The fleet is a namespace on Sepolia: a subname per robot, the base and each operator, each with its own `PermissionedResolver`, a role, an expiry, and for engines a signed mesh invite (`eth.meshrover-demo.role`, `.invite`, `.members`; ENSIP-26 `agent-context` on robots). The base reads the roster every 60 s, caches it and relays it over the mesh; `authorize()` checks expiry, role and mesh key on both the base and the rover | [`contracts/script/Fleet.s.sol:191`](contracts/script/Fleet.s.sol#L191), [`src/base/roster.ts:35`](src/base/roster.ts#L35), [`src/protocol.ts:138`](src/protocol.ts#L138) |
+| **ENSv2** | The fleet is a namespace on Sepolia: a subname per robot, the base and each operator, each with its own `PermissionedResolver`, a role, an expiry, and for engines a signed mesh invite (`eth.meshrover-demo.role`, `.invite`, `.members`; ENSIP-26 `agent-context` and `agent-endpoint[web]` on robots). The base reads the roster every 60 s, caches it and relays it over the mesh; `authorize()` checks expiry, role and mesh key on both the base and the rover | [`contracts/script/Fleet.s.sol:191`](contracts/script/Fleet.s.sol#L191), [`src/base/roster.ts:35`](src/base/roster.ts#L35), [`src/protocol.ts:138`](src/protocol.ts#L138) |
 | **Offline Protocol** | The mesh: each rover and the base drive their own engine through its local API; rover B reaches the base only through rover A; phones join over Bluetooth | [`src/engine.ts:9`](src/engine.ts#L9), [`src/base/main.ts:46`](src/base/main.ts#L46), [`src/sim/main.ts:46`](src/sim/main.ts#L46), [`operator-app/App.tsx`](operator-app/App.tsx) |
 
 The safety checks every rule above depends on are in
@@ -250,6 +253,8 @@ tests for its reject paths.
 an `unregister` only reaches it at its next roster refresh.
 
 ## Where it's deployed
+
+**Dashboard:** [meshrover.app](https://meshrover.app) (Cloudflare)
 
 **0G Galileo (chain 16602)**
 
