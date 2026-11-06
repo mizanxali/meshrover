@@ -1,0 +1,393 @@
+<!doctype html>
+<!-- MeshRover slides. Open in a browser, press F for full screen, arrow keys or click to move. #N in the URL opens slide N. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MeshRover</title>
+<style>
+  :root {
+    --bg: #000; --panel: #0a0a0a; --line: #222; --line-2: #333;
+    --text: #fff; --dim: #a0a0a0; --faint: #666;
+    --green: #22c55e; --amber: #f5a524; --red: #f04444; --violet: #a78bfa; --cyan: #38bdf8;
+    --mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); overflow: hidden; }
+  body { color: var(--text); font-family: system-ui, -apple-system, sans-serif; -webkit-font-smoothing: antialiased; }
+  .stage { position: absolute; left: 50%; top: 50%; width: 1920px; height: 1080px; }
+  .slide { position: absolute; inset: 0; padding: 100px 130px 90px; display: none; flex-direction: column; }
+  .slide.on { display: flex; }
+  .kicker { font-size: 28px; color: var(--dim); margin: 0 0 28px; }
+  .kicker b { color: var(--text); font-weight: 600; }
+  h1 { font-size: 92px; line-height: 1.08; font-weight: 650; letter-spacing: -0.02em; margin: 0; max-width: 1500px; }
+  h2 { font-size: 56px; font-weight: 650; letter-spacing: -0.01em; margin: 0 0 44px; }
+  h2 .sub { font-size: 30px; font-weight: 400; color: var(--dim); margin-left: 18px; letter-spacing: 0; }
+  .dim { color: var(--dim); } .faint { color: var(--faint); }
+  .mono { font-family: var(--mono); }
+  .foot { margin-top: auto; font-size: 30px; color: var(--dim); line-height: 1.45; }
+  .foot b { color: var(--text); font-weight: 600; }
+  .g { color: var(--green); } .v { color: var(--violet); } .c { color: var(--cyan); } .r { color: var(--red); } .a { color: var(--amber); }
+  .num { position: absolute; right: 130px; bottom: 44px; font: 20px var(--mono); color: var(--faint); }
+  svg { fill: var(--text); } svg text { font-family: system-ui, -apple-system, sans-serif; }
+  svg .mono { font-family: var(--mono); }
+
+  /* title */
+  .rule { margin-top: 72px; display: flex; font: 34px var(--mono); }
+  .rule div { border: 1px solid var(--line-2); border-radius: 4px; padding: 22px 30px; background: var(--panel); }
+  .rule .arrow { border: 0; background: none; color: var(--faint); padding: 22px 26px; }
+
+  /* numbered items */
+  .items { list-style: none; margin: 0; padding: 0; counter-reset: s; font-size: 32px; line-height: 1.38; }
+  .items li { counter-increment: s; position: relative; padding-left: 70px; margin-bottom: 34px; }
+  .items li::before { content: counter(s); position: absolute; left: 0; top: 2px; width: 44px; height: 44px; border: 1px solid var(--line-2); border-radius: 4px; font: 24px/42px var(--mono); text-align: center; color: var(--dim); }
+  .items .sub { display: block; color: var(--dim); font-size: 27px; margin-top: 6px; }
+  .items.small { font-size: 28px; } .items.small li { margin-bottom: 26px; } .items.small .sub { font-size: 24px; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 0 90px; }
+
+  /* cards */
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
+  .card { background: var(--panel); border: 1px solid var(--line-2); border-radius: 4px; padding: 26px 30px; font-size: 22px; line-height: 1.42; color: var(--dim); }
+  .card h3 { margin: 0 0 2px; font-size: 30px; font-weight: 650; }
+  .card .job { color: var(--text); font-size: 25px; font-weight: 600; margin: 0 0 12px; }
+  .card p { margin: 0 0 8px; }
+  .card .file { font: 18px var(--mono); color: var(--faint); margin-top: 12px; }
+
+  /* tables */
+  table { border-collapse: collapse; font-size: 29px; width: 100%; }
+  th { text-align: left; font-weight: 500; color: var(--faint); font-size: 24px; padding: 0 24px 16px 0; border-bottom: 1px solid var(--line-2); }
+  td { padding: 26px 24px 26px 0; border-bottom: 1px solid var(--line); vertical-align: top; line-height: 1.35; }
+  td:first-child { font-weight: 600; white-space: nowrap; }
+
+  /* sequences: actor | what happens */
+  .seq { display: grid; grid-template-columns: 150px 1fr; font-size: 28px; line-height: 1.38; }
+  .seq > div { padding: 17px 0; border-bottom: 1px solid var(--line); }
+  .seq .who { font: 24px/1.6 var(--mono); color: var(--dim); }
+  .seq .what .sub { display: block; color: var(--dim); font-size: 24px; margin-top: 4px; }
+  .seq .check { border-left: 2px solid var(--green); padding-left: 20px; }
+
+  /* side by side sequences */
+  .side { display: grid; grid-template-columns: 1fr 1fr; gap: 0 80px; align-items: start; }
+  .side h3 { font-size: 32px; font-weight: 600; margin: 0 0 12px; padding-bottom: 14px; border-bottom: 1px solid var(--line-2); }
+  .side h3 .dim { font-weight: 400; font-size: 26px; margin-left: 10px; }
+  .seq.tight { grid-template-columns: 96px 1fr; font-size: 23px; line-height: 1.36; }
+  .seq.tight > div { padding: 13px 0; }
+  .seq.tight .who { font-size: 19px; line-height: 1.75; }
+  .seq.tight .what .sub { font-size: 19.5px; margin-top: 3px; }
+  .seq.tight .check { padding-left: 16px; }
+
+  /* ENS */
+  .cols { display: grid; grid-template-columns: 1fr 560px; gap: 70px; align-items: start; }
+  .tree { font: 26px/1.75 var(--mono); white-space: pre; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 34px 40px; }
+  .steps { font-size: 30px; line-height: 1.4; }
+  .steps h3 { font-size: 32px; font-weight: 600; margin: 0 0 22px; }
+  .steps .items { font-size: 30px; margin-bottom: 44px; } .steps .items li { margin-bottom: 26px; padding-left: 62px; }
+  .steps .items li::before { width: 40px; height: 40px; font: 22px/38px var(--mono); }
+  .steps .items .sub { font-size: 26px; margin-top: 4px; }
+
+  /* links */
+  dl { display: grid; grid-template-columns: 380px 1fr; gap: 22px 40px; font-size: 28px; margin: 0; }
+  dt { color: var(--dim); } dd { margin: 0; font-family: var(--mono); font-size: 25px; line-height: 1.4; overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <!-- 1 -->
+  <section class="slide">
+    <p class="kicker"><b>MeshRover</b> · ETHGlobal Mumbai</p>
+    <h1>Robots that never touch the internet, and stop when their brain is out of reach.</h1>
+    <div class="rule">
+      <div>0G's answer, in time</div><div class="arrow">→</div><div class="g">move</div>
+      <div class="arrow" style="padding-left:70px">anything else</div><div class="arrow">→</div><div class="r">safe-stop</div>
+    </div>
+    <p class="foot">0G · World ID · ENSv2 · Offline Protocol mesh</p>
+  </section>
+
+  <!-- 2 -->
+  <section class="slide">
+    <h2>The problem</h2>
+    <p style="font-size:34px;margin:0 0 50px" class="dim">Field robots (warehouses, farms, construction, inspection) lose their internet link all the time. When they do:</p>
+    <ol class="items" style="font-size:40px">
+      <li>They keep acting on a stale plan<span class="sub">An unreachable cloud brain should mean stop. Most stacks freeze in an unknown state, or fall back to a local guess nobody audited.</span></li>
+      <li>The fallback link is open to anyone nearby<span class="sub">Local radio control is usually unauthenticated, so anyone in range can send "go".</span></li>
+    </ol>
+    <p class="foot"><b>Our answer:</b> the mesh tells a robot whether it still has a path to its brain. MLS makes the local link refuse a stranger. ENS says whose commands count.</p>
+  </section>
+
+  <!-- 3 -->
+  <section class="slide">
+    <h2>Architecture</h2>
+    <svg viewBox="0 0 1660 700" width="1660" height="700">
+      <defs>
+        <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0 1 L9 5 L0 9" fill="none" stroke="#666" stroke-width="1.5"/></marker>
+      </defs>
+      <!-- floor -->
+      <rect x="1" y="90" width="440" height="460" rx="4" fill="none" stroke="#333" stroke-dasharray="8 8"/>
+      <text x="22" y="74" font-size="23" fill="#a0a0a0">no internet</text>
+      <rect x="40" y="130" width="360" height="120" rx="4" fill="#0a0a0a" stroke="#333"/>
+      <text x="64" y="180" font-size="30" font-weight="600">rover A <tspan fill="#a0a0a0" font-weight="400" font-size="22">sim, own engine</tspan></text>
+      <text x="64" y="218" font-size="22" fill="#a0a0a0">+ the webcam, as a safety cam</text>
+      <line x1="220" y1="250" x2="220" y2="390" stroke="#666" stroke-width="2"/>
+      <text x="236" y="328" font-size="22" fill="#a0a0a0">relays for B</text>
+      <rect x="40" y="390" width="360" height="120" rx="4" fill="#0a0a0a" stroke="#333"/>
+      <text x="64" y="440" font-size="30" font-weight="600">rover B <tspan fill="#a0a0a0" font-weight="400" font-size="22">sim, own engine</tspan></text>
+      <text x="64" y="478" font-size="22" fill="#a0a0a0">peers only with rover A</text>
+      <!-- A to base -->
+      <line x1="400" y1="190" x2="560" y2="190" stroke="#666" stroke-width="2"/>
+      <text x="480" y="174" font-size="21" fill="#a0a0a0" text-anchor="middle">mesh</text>
+      <text x="480" y="216" font-size="21" fill="#a0a0a0" text-anchor="middle">(loopback)</text>
+      <!-- base -->
+      <rect x="560" y="100" width="520" height="410" rx="4" fill="#0a0a0a" stroke="#666"/>
+      <text x="590" y="152" font-size="34" font-weight="600">base station</text>
+      <text x="590" y="188" font-size="22" fill="#a0a0a0">the laptop · the only thing online</text>
+      <text x="590" y="230" font-size="22" fill="#a0a0a0">its own engine + a Node bridge, serving:</text>
+      <text x="590" y="274" font-size="23" class="mono">fleet.decide    <tspan fill="#a0a0a0">0G decisions</tspan></text>
+      <text x="590" y="312" font-size="23" class="mono">fleet.approve   <tspan fill="#a0a0a0">approvals</tspan></text>
+      <text x="590" y="350" font-size="23" class="mono">fleet.roster    <tspan fill="#a0a0a0">ENS roster</tspan></text>
+      <text x="590" y="388" font-size="23" class="mono">fleet.status    <tspan fill="#a0a0a0">for phones</tspan></text>
+      <text x="590" y="426" font-size="23" class="mono">fleet.approvals <tspan fill="#a0a0a0">cards</tspan></text>
+      <text x="590" y="476" font-size="22" fill="#a0a0a0">+ the episode log, the dashboard</text>
+      <!-- phone -->
+      <line x1="820" y1="510" x2="820" y2="590" stroke="#666" stroke-width="2" stroke-dasharray="6 6"/>
+      <text x="840" y="558" font-size="21" fill="#a0a0a0">mesh over Bluetooth</text>
+      <rect x="640" y="590" width="360" height="100" rx="4" fill="#0a0a0a" stroke="#333"/>
+      <text x="664" y="634" font-size="28" font-weight="600">operator's phone</text>
+      <text x="664" y="670" font-size="22" fill="#a0a0a0">rover status · approval cards</text>
+      <!-- out -->
+      <text x="1175" y="40" font-size="21" fill="#a0a0a0" text-anchor="middle">internet</text>
+      <path d="M1080 160 C 1180 160, 1180 60, 1268 60" fill="none" stroke="#666" stroke-width="2" marker-end="url(#ah)"/>
+      <path d="M1080 230 C 1180 230, 1180 190, 1268 190" fill="none" stroke="#666" stroke-width="2" marker-end="url(#ah)"/>
+      <path d="M1080 300 C 1180 300, 1180 320, 1268 320" fill="none" stroke="#666" stroke-width="2" marker-end="url(#ah)"/>
+      <path d="M1080 370 C 1180 370, 1180 450, 1268 450" fill="none" stroke="#666" stroke-width="2" marker-end="url(#ah)"/>
+      <path d="M1080 440 C 1180 440, 1180 580, 1268 580" fill="none" stroke="#666" stroke-width="2" marker-end="url(#ah)"/>
+      <rect x="1270" y="15" width="389" height="90" rx="4" fill="#0a0a0a" stroke="#22c55e"/>
+      <text x="1294" y="56" font-size="27" font-weight="650" fill="#22c55e">0G Router</text><text x="1294" y="88" font-size="21" fill="#a0a0a0">a vision model, every decision</text>
+      <rect x="1270" y="145" width="389" height="90" rx="4" fill="#0a0a0a" stroke="#22c55e"/>
+      <text x="1294" y="186" font-size="27" font-weight="650" fill="#22c55e">0G Storage</text><text x="1294" y="218" font-size="21" fill="#a0a0a0">each episode's full log</text>
+      <rect x="1270" y="275" width="389" height="90" rx="4" fill="#0a0a0a" stroke="#22c55e"/>
+      <text x="1294" y="316" font-size="27" font-weight="650" fill="#22c55e">0G Chain</text><text x="1294" y="348" font-size="21" fill="#a0a0a0">EpisodeAnchor, on Galileo</text>
+      <rect x="1270" y="405" width="389" height="90" rx="4" fill="#0a0a0a" stroke="#a78bfa"/>
+      <text x="1294" y="446" font-size="27" font-weight="650" fill="#a78bfa">World ID</text><text x="1294" y="478" font-size="21" fill="#a0a0a0">the human checkpoint</text>
+      <rect x="1270" y="535" width="389" height="90" rx="4" fill="#0a0a0a" stroke="#38bdf8"/>
+      <text x="1294" y="576" font-size="27" font-weight="650" fill="#38bdf8">ENSv2 on Sepolia</text><text x="1294" y="608" font-size="21" fill="#a0a0a0">the fleet roster</text>
+    </svg>
+    <p class="foot">Every mesh message is <b>sealed with MLS</b>; an unsealed <span class="mono">fleet.*</span> body is refused. No rover, and no mesh link, uses the internet.</p>
+  </section>
+
+  <!-- 4 -->
+  <section class="slide">
+    <h2>What each partner does</h2>
+    <div class="grid3">
+      <div class="card" style="border-color:#22c55e55">
+        <h3 class="g">0G Compute</h3><p class="job">picks every move</p>
+        <p>A vision model sees the rover's frame and the moves on offer (Router, temperature 0).</p>
+        <p>Verified tier, on a TEE-attested model: <span class="mono">0gm-1.0-35b-a3b</span> (TeeML, in a TDX enclave). A reply 0G marks not verified is refused.</p>
+        <p class="file">src/base/decide.ts</p>
+      </div>
+      <div class="card" style="border-color:#22c55e55">
+        <h3 class="g">0G Storage</h3><p class="job">keeps the whole run</p>
+        <p>One JSONL file per episode: every decision with its request ID and the frame the model saw, every stop, approval and denial.</p>
+        <p>Uploaded when the episode ends, retried every 15 s while offline.</p>
+        <p class="file">src/base/record.ts</p>
+      </div>
+      <div class="card" style="border-color:#22c55e55">
+        <h3 class="g">0G Chain</h3><p class="job">anchors it</p>
+        <p><span class="mono">EpisodeAnchor</span> on Galileo: the episode's storage root and counts. Only the base can write it, once per episode.</p>
+        <p>The dashboard lists the anchors and replays an episode from its root.</p>
+        <p class="file">contracts/src/EpisodeAnchor.sol</p>
+      </div>
+      <div class="card" style="border-color:#a78bfa55">
+        <h3 class="v">World ID</h3><p class="job">a real human approves</p>
+        <p>Before zone C: World's device flow, the card on the operator's phone over the mesh, approved in World App.</p>
+        <p>The base validates the ID token itself, then issues a 10 s single-use approval.</p>
+        <p class="file">src/base/world.ts</p>
+      </div>
+      <div class="card" style="border-color:#38bdf855">
+        <h3 class="c">ENSv2</h3><p class="job">says who's in the fleet</p>
+        <p>A subname per robot, base and operator, each with its own resolver: role, mesh key, expiry; <span class="mono">agent-context</span> on robots.</p>
+        <p>Checked by <span class="mono">authorize()</span> on the base and again on the rover.</p>
+        <p class="file">src/base/roster.ts · src/protocol.ts</p>
+      </div>
+      <div class="card">
+        <h3>Offline Protocol</h3><p class="job">carries every message</p>
+        <p>Each rover and the base run their own mesh engine. Rover B reaches the base only through rover A; phones join over Bluetooth.</p>
+        <p>MLS-sealed end to end.</p>
+        <p class="file">src/engine.ts · operator-app/</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 -->
+  <section class="slide">
+    <h2>Four loops <span class="sub">0G is the brain, not the spinal cord</span></h2>
+    <table>
+      <tr><th>Loop</th><th>Runs on</th><th>Needs the network?</th><th>What it does</th></tr>
+      <tr><td>Motion</td><td>the rover, 20 Hz</td><td class="g">never</td><td>follows the current aisle, stops for pallets and other rovers</td></tr>
+      <tr><td>Decision</td><td>rover → base → 0G, at each junction</td><td>mesh and internet</td><td>picks the next aisle from the moves on offer</td></tr>
+      <tr><td>Human checkpoint</td><td>rover → base → World → operator</td><td>mesh and internet</td><td>approves entering restricted zone C</td></tr>
+      <tr><td>Record</td><td>base → 0G Storage, then 0G Chain</td><td>internet, afterwards</td><td>keeps every decision, stop, approval and denial; anchored once per episode</td></tr>
+    </table>
+    <p class="foot">Motion stays on the robot. The network is only ever waited on at a checkpoint, and <b>no rover waits on a chain</b>.</p>
+  </section>
+
+  <!-- 6 -->
+  <section class="slide">
+    <h2>The rover's state machine</h2>
+    <svg viewBox="0 0 1660 640" width="1660" height="640">
+      <defs>
+        <marker id="m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0 1 L9 5 L0 9" fill="none" stroke="#888" stroke-width="1.5"/></marker>
+        <marker id="mg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0 1 L9 5 L0 9" fill="none" stroke="#22c55e" stroke-width="1.5"/></marker>
+        <marker id="mr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0 1 L9 5 L0 9" fill="none" stroke="#f04444" stroke-width="1.5"/></marker>
+      </defs>
+      <!-- states -->
+      <rect x="20" y="270" width="260" height="100" rx="4" fill="#0a0a0a" stroke="#22c55e"/>
+      <text x="150" y="331" font-size="30" font-weight="650" text-anchor="middle" class="mono" fill="#22c55e">DRIVING</text>
+      <rect x="600" y="60" width="440" height="100" rx="4" fill="#0a0a0a" stroke="#666"/>
+      <text x="820" y="121" font-size="30" font-weight="650" text-anchor="middle" class="mono">AWAITING_DECISION</text>
+      <rect x="600" y="480" width="440" height="100" rx="4" fill="#0a0a0a" stroke="#666"/>
+      <text x="820" y="541" font-size="30" font-weight="650" text-anchor="middle" class="mono">AWAITING_APPROVAL</text>
+      <rect x="1340" y="270" width="300" height="100" rx="4" fill="#0a0a0a" stroke="#f04444"/>
+      <text x="1490" y="331" font-size="30" font-weight="650" text-anchor="middle" class="mono" fill="#f04444">SAFE_STOPPED</text>
+      <!-- driving <-> decision -->
+      <path d="M150 270 C 150 150, 400 90, 598 90" fill="none" stroke="#888" stroke-width="2" marker-end="url(#m)"/>
+      <text x="330" y="78" font-size="24">at a junction</text>
+      <path d="M600 135 C 420 135, 260 200, 240 268" fill="none" stroke="#22c55e" stroke-width="2" marker-end="url(#mg)"/>
+      <text x="350" y="222" font-size="24" fill="#22c55e">a valid decision from 0G</text>
+      <!-- driving <-> approval -->
+      <path d="M150 370 C 150 490, 400 550, 598 550" fill="none" stroke="#888" stroke-width="2" marker-end="url(#m)"/>
+      <text x="330" y="595" font-size="24">at the zone C gate</text>
+      <path d="M600 505 C 420 505, 260 440, 240 372" fill="none" stroke="#22c55e" stroke-width="2" marker-end="url(#mg)"/>
+      <text x="350" y="430" font-size="24" fill="#22c55e">a valid approval</text>
+      <!-- to safe stop -->
+      <path d="M1040 90 C 1300 90, 1490 140, 1490 268" fill="none" stroke="#f04444" stroke-width="2" marker-end="url(#mr)"/>
+      <text x="1070" y="30" font-size="22" fill="#f04444">no answer by the deadline · wrong seq · not on offer</text>
+      <text x="1070" y="60" font-size="22" fill="#f04444">doesn't parse · 0G unreachable · 0G says stop</text>
+      <path d="M1040 550 C 1300 550, 1490 500, 1490 372" fill="none" stroke="#f04444" stroke-width="2" marker-end="url(#mr)"/>
+      <text x="1070" y="610" font-size="22" fill="#f04444">denied · expired · approver not authorized · World unreachable</text>
+      <!-- retry -->
+      <path d="M1400 270 C 1400 200, 1200 140, 1042 140" fill="none" stroke="#888" stroke-width="2" stroke-dasharray="7 7" marker-end="url(#m)"/>
+      <text x="1330" y="236" font-size="22" fill="#a0a0a0" text-anchor="end">asks 0G again with a new seq</text>
+      <text x="1330" y="266" font-size="22" fill="#a0a0a0" text-anchor="end">(after a denial, the old decision is spent)</text>
+    </svg>
+    <p class="foot">Every doubt resolves to <b class="r">SAFE_STOPPED</b>. Leaving it takes a fresh decision from 0G, never a timer.</p>
+  </section>
+
+  <!-- 7 -->
+  <section class="slide">
+    <h2>Step by step</h2>
+    <div class="side">
+      <div>
+        <h3>One junction <span class="dim">0G</span></h3>
+        <div class="seq tight">
+      <div class="who">rover</div><div class="what">Stops at the junction and sends <span class="mono">fleet.decide</span> over the mesh<span class="sub">its frame (+ the safety cam), the moves on offer, a new seq; starts its 6.5&nbsp;s deadline</span></div>
+      <div class="who">base</div><div class="what">Checks the sender's mesh key is that robot's on the ENS roster, then asks 0G<span class="sub">the frame and the options to a vision model through the Router; gives it 6 s</span></div>
+      <div class="who">0G</div><div class="what">Answers an action and a reason<span class="sub">the base logs it with the 0G request ID, model and tier before replying</span></div>
+      <div class="who">base</div><div class="what">Sends the decision back, sealed, over the mesh<span class="sub">or an error: timeout, unreachable, not verified, bad reply</span></div>
+      <div class="who">rover</div><div class="what check">Accepts it only if: sealed · from the base · its pending seq · before its deadline · a move it offered<span class="sub">then logs it, then moves. Anything else: <span class="r">SAFE_STOPPED</span>, and it asks again in 3&nbsp;s</span></div>
+    </div>
+      </div>
+      <div>
+        <h3>Zone C <span class="dim">World ID</span></h3>
+        <div class="seq tight">
+      <div class="who">rover</div><div class="what">Holds at the gate and sends <span class="mono">fleet.approve</span> with a fresh nonce</div>
+      <div class="who">base</div><div class="what">Checks the rover's key on the roster, starts World's device flow, sends the card to the phones over the mesh<span class="sub">the dashboard only shows who's waiting; approving happens on the phone</span></div>
+      <div class="who">phone</div><div class="what">The operator opens the card in World App and approves<span class="sub">within 120 s</span></div>
+      <div class="who">base</div><div class="what">Validates World's ID token, then the person<span class="sub">signature (RS256), issuer, audience, signed in during this request, a World credential, proof of presence → which fleet name that World ID is → on ENS: operator or supervisor, not expired</span></div>
+      <div class="who">base</div><div class="what">Sends an approval naming the approver, echoing the nonce, valid for 10 s<span class="sub">or a denial with the reason</span></div>
+      <div class="who">rover</div><div class="what check">Accepts it only if: sealed · from the base · its nonce · not expired · an approver its own roster allows<span class="sub">then enters. A denial: it holds, and asks 0G again</span></div>
+    </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8 -->
+  <section class="slide">
+    <h2>The fleet is a name on <span class="c">ENSv2</span></h2>
+    <div class="cols">
+<div class="tree"><span class="c">meshrover-demo.eth</span>    <span class="dim">own registry · members list</span>
+├─ rover-a          <span class="dim">role</span> robot       <span class="dim">key · agent-context</span>
+├─ rover-b          <span class="dim">role</span> robot       <span class="dim">key · agent-context</span>
+├─ base             <span class="dim">role</span> base        <span class="dim">key</span>
+├─ alice            <span class="dim">role</span> supervisor
+└─ ravi-contractor  <span class="dim">role</span> operator    <span class="r">expired</span></div>
+      <div class="steps">
+        <h3>Registering an operator</h3>
+        <ol class="items">
+          <li>The admin registers <span class="mono c">alice</span> with a role<span class="sub">public, on chain, with its own expiry</span></li>
+          <li>Alice signs in with <span class="v">World ID</span> once<span class="sub">the base links it to her name privately; it's never published</span></li>
+        </ol>
+        <h3>Enforced on every message</h3>
+        <span class="dim">Wrong mesh key, wrong role or an expired name: refused, by the base and again by the rover.</span>
+      </div>
+    </div>
+    <p class="foot"><b>ENS says what Alice may do. World proves it's Alice.</b><br>The base reads the roster every minute and passes it to the rovers over the mesh. Rovers never read a chain.</p>
+  </section>
+
+  <!-- 9 -->
+  <section class="slide">
+    <h2>The record <span class="sub">0G Storage and 0G Chain</span></h2>
+    <svg viewBox="0 0 1660 330" width="1660" height="330">
+      <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0 1 L9 5 L0 9" fill="none" stroke="#666" stroke-width="1.5"/></marker></defs>
+      <rect x="1" y="40" width="370" height="250" rx="4" fill="#0a0a0a" stroke="#333"/>
+      <text x="28" y="92" font-size="30" font-weight="600">episode log</text>
+      <text x="28" y="134" font-size="22" fill="#a0a0a0" class="mono">base.jsonl</text>
+      <text x="28" y="180" font-size="22" fill="#a0a0a0">every decision with its</text>
+      <text x="28" y="210" font-size="22" fill="#a0a0a0">request ID and frame, every</text>
+      <text x="28" y="240" font-size="22" fill="#a0a0a0">stop, approval and denial</text>
+      <line x1="371" y1="165" x2="426" y2="165" stroke="#666" stroke-width="2" marker-end="url(#ar)"/>
+      <rect x="430" y="40" width="370" height="250" rx="4" fill="#0a0a0a" stroke="#22c55e"/>
+      <text x="457" y="92" font-size="30" font-weight="600" fill="#22c55e">0G Storage</text>
+      <text x="457" y="134" font-size="22" fill="#a0a0a0">uploaded when the</text>
+      <text x="457" y="164" font-size="22" fill="#a0a0a0">episode ends; gives</text>
+      <text x="457" y="194" font-size="22" fill="#a0a0a0">a root hash</text>
+      <line x1="800" y1="165" x2="855" y2="165" stroke="#666" stroke-width="2" marker-end="url(#ar)"/>
+      <rect x="859" y="40" width="370" height="250" rx="4" fill="#0a0a0a" stroke="#22c55e"/>
+      <text x="886" y="92" font-size="30" font-weight="600" fill="#22c55e">0G Chain</text>
+      <text x="886" y="134" font-size="22" fill="#a0a0a0" class="mono">EpisodeAnchor.anchor()</text>
+      <text x="886" y="180" font-size="22" fill="#a0a0a0">episode → root and counts</text>
+      <text x="886" y="210" font-size="22" fill="#a0a0a0">only the base, only once</text>
+      <line x1="1229" y1="165" x2="1284" y2="165" stroke="#666" stroke-width="2" marker-end="url(#ar)"/>
+      <rect x="1288" y="40" width="371" height="250" rx="4" fill="#0a0a0a" stroke="#333"/>
+      <text x="1315" y="92" font-size="30" font-weight="600">dashboard</text>
+      <text x="1315" y="134" font-size="22" fill="#a0a0a0">lists the anchors, fetches</text>
+      <text x="1315" y="164" font-size="22" fill="#a0a0a0">the file by its root and</text>
+      <text x="1315" y="194" font-size="22" fill="#a0a0a0">replays the run</text>
+    </svg>
+    <p style="font-size:28px;line-height:1.5;margin:40px 0 0" class="dim">Live episode, verified tier, <span class="mono" style="color:#fff">ep-1106-2358</span>: 55 decisions from 0G, a denial, then a World ID approval, zone C entered.<br>
+      root <span class="mono">0xb20b8f32…8a090fb</span> · anchor tx <span class="mono">0xa48935c3…460bd46</span> · block 64211935</p>
+    <p class="foot">Written after the episode. <b>No rover ever reads it.</b> Runs against a stand-in for 0G are never recorded.</p>
+  </section>
+
+  <!-- 10 -->
+  <section class="slide">
+    <h2>Where it lives</h2>
+    <dl>
+      <dt>Code</dt><dd>github.com/mizanxali/meshrover</dd>
+      <dt>Live dashboard</dt><dd>meshrover.app</dd>
+      <dt>EpisodeAnchor (Galileo)</dt><dd>0x8530Ec9B37EDc064527c5Dd20BAFE264F78cAF67</dd>
+      <dt>Fleet name (Sepolia)</dt><dd>meshrover-demo.eth</dd>
+      <dt>Fleet registry</dt><dd>0xb8c8510f6BED87bc161530C83BBF5dd0272c1673</dd>
+    </dl>
+    <p class="foot"><b>Without 0G there are no decisions, so the rovers can only stop.</b></p>
+  </section>
+
+</div>
+<script>
+  const slides = [...document.querySelectorAll('.slide')];
+  slides.forEach((s, k) => s.insertAdjacentHTML('beforeend', `<div class="num">${k + 1} / ${slides.length}</div>`));
+  let i = Math.max(0, Math.min(slides.length - 1, Number(location.hash.slice(1)) - 1 || 0));
+  const show = () => { slides.forEach((s, k) => s.classList.toggle('on', k === i)); history.replaceState(null, '', '#' + (i + 1)); };
+  const fit = () => { document.querySelector('.stage').style.transform = `translate(-50%, -50%) scale(${Math.min(innerWidth / 1920, innerHeight / 1080)})`; };
+  addEventListener('resize', fit);
+  addEventListener('keydown', (e) => {
+    if (['ArrowRight', 'ArrowDown', ' ', 'PageDown'].includes(e.key)) i = Math.min(slides.length - 1, i + 1);
+    else if (['ArrowLeft', 'ArrowUp', 'PageUp'].includes(e.key)) i = Math.max(0, i - 1);
+    else if (e.key === 'f') return document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+    else return;
+    show();
+  });
+  addEventListener('click', () => { i = (i + 1) % slides.length; show(); });
+  fit(); show();
+</script>
+</body>
+</html>
