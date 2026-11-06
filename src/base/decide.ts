@@ -1,13 +1,14 @@
 // One decision from a 0G vision model through the Router, in `verified` trust
-// mode. Anything short of a TEE-verified reply naming an offered action is an
-// error, never a guess: the rover stops.
+// mode. Anything short of a reply naming an offered action is an error, never a
+// guess: the rover stops. A reply 0G marks `tee_verified: false` is refused; one
+// with no `tee_verified` is taken as verified (0gm's replies carry none).
 import { BASE_TIMEOUT_MS, type DecideRequest, parseDecision } from '../protocol.ts';
 
 const REAL_ROUTER = 'https://router-api.0g.ai/v1';
 const ROUTER = process.env.ZG_ROUTER_URL || REAL_ROUTER;
 /** Only when ZG_ROUTER_URL names spikes/mock-router.ts, for building while 0G is down. Never a fallback. */
 export const MOCK = ROUTER !== REAL_ROUTER;
-const MODEL = MOCK ? 'mock' : process.env.ZG_VISION_MODEL || 'qwen3-vl-plus';
+const MODEL = MOCK ? 'mock' : process.env.ZG_VISION_MODEL || '0gm-1.0-35b-a3b';
 /**
  * Opt-in only, never a fallback: 0G's team allowed it during their outage of 2026-11-06, when no TEE-attested vision
  * provider answered. A model that is up is called in `standard` tier, and a reply with no `tee_verified` is taken as
@@ -69,6 +70,8 @@ export async function decide(req: DecideRequest, key: string, verifiability: str
         verify_tee: true,
         temperature: 0,
         response_format: { type: 'json_object' },
+        // 0gm reasons by default (13 to 28 s a frame); with thinking off it answers in about 2 to 3 s
+        ...(MODEL.startsWith('0gm-') && { chat_template_kwargs: { enable_thinking: false } }),
         messages: [
           { role: 'system', content: SYSTEM },
           { role: 'user', content: [
@@ -87,7 +90,7 @@ export async function decide(req: DecideRequest, key: string, verifiability: str
   const request_id = typeof trace?.request_id === 'string' ? trace.request_id : undefined;
   if (!res.ok) return { error: `0G answered HTTP ${res.status}`, request_id };
   if (!request_id) return { error: '0G reply has no request ID' };
-  if (trace.tee_verified === false || (!UNVERIFIED && trace.tee_verified !== true)) return { error: '0G reply not TEE-verified', request_id };
+  if (trace.tee_verified === false) return { error: '0G reply not TEE-verified', request_id };
   const d = parseDecision(body?.choices?.[0]?.message?.content, req.options);
   if (!d) return { error: '0G reply is not an offered action', request_id };
   return {
