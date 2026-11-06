@@ -55,7 +55,7 @@ const bar = (title: string, sub = '', right = '') =>
 const app = document.querySelector<HTMLElement>('#app')!;
 app.innerHTML = `
   <header>
-    <div class="t">Mesh Rover<span>${esc(FLEET_NAME)}</span></div>
+    <div class="t">MeshRover<span>${esc(FLEET_NAME)}</span></div>
     <div class="status">
       <span id="p-sim"><i class="dot"></i>Sim <b>connecting</b></span>
       <span id="p-base"><i class="dot"></i>Base <b>connecting</b></span>

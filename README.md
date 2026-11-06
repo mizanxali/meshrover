@@ -1,4 +1,4 @@
-# Mesh Rover
+# MeshRover
 
 **Robots that never need the internet, and stop safely when their AI is out of reach.**
 

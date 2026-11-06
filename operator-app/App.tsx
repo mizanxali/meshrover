@@ -150,7 +150,7 @@ export default function App() {
       <SafeAreaView style={s.screen}>
         <ScrollView contentContainerStyle={s.body}>
           <View style={s.row}>
-            <Text style={s.h1}>Mesh Rover</Text>
+            <Text style={s.h1}>MeshRover</Text>
             <View style={s.state}>
               <Dot color={TONE[conn]} pulse={conn === 'ok'} />
               <Text style={[s.stateText, { color: TONE[conn] }]}>{conn === 'ok' ? 'Connected' : conn === 'bad' ? 'Error' : 'Connecting'}</Text>

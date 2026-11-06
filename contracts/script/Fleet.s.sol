@@ -208,7 +208,7 @@ contract Fleet is Script {
     /// ENSIP-26 agent records on a robot.
     function robotRecords(address resolver, bytes memory name) internal {
         IPermissionedResolver(resolver).setText(name, "agent-context",
-            "Mesh Rover warehouse rover (simulated). Moves only on 0G decisions relayed by the fleet's base over an offline mesh; obeys only keys this fleet's ENS roster lists.");
+            "MeshRover warehouse rover (simulated). Moves only on 0G decisions relayed by the fleet's base over an offline mesh; obeys only keys this fleet's ENS roster lists.");
         string memory endpoint = vm.envOr("AGENT_ENDPOINT", string(""));
         if (bytes(endpoint).length > 0) IPermissionedResolver(resolver).setText(name, "agent-endpoint[web]", endpoint);
     }

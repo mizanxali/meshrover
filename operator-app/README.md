@@ -1,4 +1,4 @@
-# Mesh Rover operator app
+# MeshRover operator app
 
 The operator's phone: rover status and approval cards from the base, over
 Bluetooth only. Approving opens World ID's link in the browser, over the
