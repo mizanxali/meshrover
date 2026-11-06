@@ -18,7 +18,8 @@ import { type View, renderFrame } from './world.ts';
 // Each rover's engine (local API port, from spikes/engines.sh) and where it starts.
 const FLEET: Record<string, { port: number; start: { from: string; to: string } }> = {
   'rover-a': { port: 7202, start: { from: 'g', to: 'J1' } }, // J1, facing north
-  'rover-b': { port: 7203, start: { from: 'c', to: 'J2' } }, // J2, facing north
+  // J2, facing south: facing north, both rovers took the top aisle, met head-on and each chose stop to wait for the other
+  'rover-b': { port: 7203, start: { from: 'b', to: 'J2' } },
 };
 // Rover A's safety camera (avfoundation device name). CAMERA=none: drawn frames only, as rover B has.
 const CAMERA = process.env.CAMERA ?? 'FaceTime HD Camera';
